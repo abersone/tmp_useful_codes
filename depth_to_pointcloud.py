@@ -534,7 +534,7 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
             bbox=bbox,
             output_prefix=output_prefix,
             z_threshold=0.06,
-            cluster_radius=4,
+            cluster_radius=3,
             corner_window_size=corner_window_size,
             cell_size=cell_size,
             peak_ratio=peak_ratio
@@ -710,7 +710,7 @@ def main():
     # 寻找球顶点的参数
     corner_window_size = 9
     cell_size = (5, 5)
-    peak_ratio = 0.67
+    peak_ratio = 0.68
     
     # 计算半球顶点高度参数
     peak_window_size = 7
@@ -722,7 +722,7 @@ def main():
             folder_path=data_folder,
             roi_vertices=roi_vertices,
             start_idx=1,
-            end_idx=1,
+            end_idx=50,
             corner_window_size=corner_window_size,
             cell_size=cell_size,
             peak_ratio=peak_ratio,
