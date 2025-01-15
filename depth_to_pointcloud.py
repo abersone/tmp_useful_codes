@@ -1,9 +1,10 @@
 import numpy as np
 from PIL import Image
 import configparser
+import matplotlib
+matplotlib.use('Agg')  # 在导入pyplot之前设置
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from matplotlib.path import Path
 import os
 from pathlib import Path
 from scipy.ndimage import gaussian_filter
@@ -98,21 +99,8 @@ class DepthToPointCloud:
         np.savetxt(output_path_3d, points_3d, fmt='%.6f', delimiter=' ')
         np.savetxt(output_path_2d, points_2d, fmt='%d', delimiter=' ')
         
-    def visualize_region(self, depth_image):
-        """可视化四边形区域"""
-        plt.figure(figsize=(10, 8))
-        plt.imshow(depth_image, cmap='jet')
         
-        # 绘制四边形区域
-        vertices = np.vstack((self.vertices, self.vertices[0]))  # 闭合多边形
-        plt.plot(vertices[:, 0], vertices[:, 1], 'r-', linewidth=2, label='ROI')
-        
-        plt.colorbar()
-        plt.title('Depth Map with ROI')
-        plt.legend()
-        plt.show()
-        
-    def crop_roi_from_image(self, image_path, output_prefix):
+    def crop_roi_from_image(self, image_path, output_prefix, save_vertices_plot=False):
         """从原始图像中裁剪ROI区域并绘制顶点"""
         # 读取原始图像
         original_image = np.array(Image.open(image_path))
@@ -126,37 +114,38 @@ class DepthToPointCloud:
         # 裁剪图像
         cropped_image = original_image[min_y:max_y, min_x:max_x]
         
-        # 创建图像显示
-        plt.figure(figsize=(10, 8))
-        plt.imshow(cropped_image)
-        
-        # 调整顶点坐标到裁剪后的坐标系
-        adjusted_vertices = self.vertices.copy()
-        adjusted_vertices[:, 0] -= min_x
-        adjusted_vertices[:, 1] -= min_y
-        
-        # 绘制顶点和连线
-        vertices = np.vstack((adjusted_vertices, adjusted_vertices[0]))  # 闭合多边形
-        plt.plot(vertices[:, 0], vertices[:, 1], 'r-', linewidth=2, label='ROI')
-        
-        # 绘制顶点并添加标签
-        for i, (x, y) in enumerate(adjusted_vertices):
-            plt.plot(x, y, 'ro', markersize=10)
-            plt.text(x+10, y+10, f'P{i+1}', color='red', fontsize=12)
-        
-        plt.title('Cropped Image with ROI Vertices')
-        plt.axis('on')
-        plt.legend()
-        
-        # 使用output_prefix构建保存路径
-        vertices_path = f'{output_prefix}_cropped_roi_with_vertices.png'
-        cropped_path = f'{output_prefix}_cropped_roi.png'
-        
-        # 保存带顶点标注的图像
-        plt.savefig(vertices_path)
-        plt.close()
+        if save_vertices_plot:
+            # 创建图像显示
+            plt.figure(figsize=(10, 8))
+            plt.imshow(cropped_image)
+            
+            # 调整顶点坐标到裁剪后的坐标系
+            adjusted_vertices = self.vertices.copy()
+            adjusted_vertices[:, 0] -= min_x
+            adjusted_vertices[:, 1] -= min_y
+            
+            # 绘制顶点和连线
+            vertices = np.vstack((adjusted_vertices, adjusted_vertices[0]))  # 闭合多边形
+            plt.plot(vertices[:, 0], vertices[:, 1], 'r-', linewidth=2, label='ROI')
+            
+            # 绘制顶点并添加标签
+            for i, (x, y) in enumerate(adjusted_vertices):
+                plt.plot(x, y, 'ro', markersize=10)
+                plt.text(x+10, y+10, f'P{i+1}', color='red', fontsize=12)
+            
+            plt.title('Cropped Image with ROI Vertices')
+            plt.axis('on')
+            plt.legend()
+            
+            # 使用output_prefix构建保存路径
+            vertices_path = f'{output_prefix}_cropped_roi_with_vertices.png'
+            
+            # 保存带顶点标注的图像
+            plt.savefig(vertices_path)
+            plt.close()
         
         # 保存原始裁剪图像
+        cropped_path = f'{output_prefix}_cropped_roi.png'
         cropped_img = Image.fromarray(cropped_image)
         cropped_img.save(cropped_path)
         
@@ -225,41 +214,42 @@ class DepthToPointCloud:
         
         
         # 2. 拟合平面
-        # 首先使用最小二乘法获得初始解
-        A = np.column_stack((sample_points[:, 0], sample_points[:, 1], np.ones_like(sample_points[:, 0])))
-        b = sample_points[:, 2]
-        # 求解平面参数 [a, b, c]
-        params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
+        # # 首先使用最小二乘法获得初始解
+        # A = np.column_stack((sample_points[:, 0], sample_points[:, 1], np.ones_like(sample_points[:, 0])))
+        # b = sample_points[:, 2]
+        # # 求解平面参数 [a, b, c]
+        # params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
         
-        # 获取初始平面参数
-        initial_normal = np.array([-params[0], -params[1], 1])
-        initial_normal = initial_normal / np.linalg.norm(initial_normal)
-        initial_d = -params[2]
+        # # 获取初始平面参数
+        # initial_normal = np.array([-params[0], -params[1], 1])
+        # initial_normal = initial_normal / np.linalg.norm(initial_normal)
+        # initial_d = -params[2]
         
-        # 将最小二乘的结果作为优化的初始值
-        initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
+        # # 将最小二乘的结果作为优化的初始值
+        # initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
         
-        # 使用optimize.minimize进行优化
-        def plane_error(params, points):
-            a, b, c, d = params
-            normal = np.array([a, b, c])
-            normal = normal / np.linalg.norm(normal)
-            distances = np.abs(np.dot(points, normal) + d)
-            return np.mean(distances ** 2)
+        # # 使用optimize.minimize进行优化
+        # def plane_error(params, points):
+        #     a, b, c, d = params
+        #     normal = np.array([a, b, c])
+        #     normal = normal / np.linalg.norm(normal)
+        #     distances = np.abs(np.dot(points, normal) + d)
+        #     return np.mean(distances ** 2)
         
-        # 优化求解
-        result = optimize.minimize(
-            plane_error, 
-            initial_guess, 
-            args=(sample_points,),
-            method='Nelder-Mead'
-        )
+        # # 优化求解
+        # result = optimize.minimize(
+        #     plane_error, 
+        #     initial_guess, 
+        #     args=(sample_points,),
+        #     method='Nelder-Mead'
+        # )
         
-        # 获取最终的平面参数
-        a, b, c, d = result.x
-        normal = np.array([a, b, c])
-        normal = normal / np.linalg.norm(normal)
-        d = d / np.linalg.norm(normal)
+        # # 获取最终的平面参数
+        # a, b, c, d = result.x
+        # normal = np.array([a, b, c])
+        # normal = normal / np.linalg.norm(normal)
+        # d = d / np.linalg.norm(normal)
+        normal, d = self.fit_plane(sample_points)
         
         # 3. 计算所有点到平面的距离
         distances = np.abs(np.dot(points_3d, normal) + d) / np.linalg.norm(normal)
@@ -427,24 +417,28 @@ class DepthToPointCloud:
             median_point = window_points[np.argmin(np.abs(window_points[:, 2] - median_z))]
             
             # 2. 获取圆周上的点
-            circle_points = []
+            circle_points_3d = []
+            circle_points_2d = []
             for theta in np.linspace(0, 2*np.pi, 36):  # 每10度采样一个点
                 x = int(peak_x + r_pixel * np.cos(theta))
                 y = int(peak_y + r_pixel * np.sin(theta))
                 if (x, y) in point_map:
-                    circle_points.append(point_map[(x, y)])
+                    circle_points_3d.append(point_map[(x, y)])
+                    circle_points_2d.append((x, y))
             
-            if len(circle_points) < 3:  # 需要至少3个点来拟合平面
+            if len(circle_points_3d) < 3:  # 需要至少3个点来拟合平面
                 continue
             
-            circle_points = np.array(circle_points)
+            circle_points_3d = np.array(circle_points_3d)
             
-            # 拟合平面 ax + by + cz + d = 0
-            center = np.mean(circle_points, axis=0)
-            # 使用SVD进行平面拟合
-            u, s, vh = np.linalg.svd(circle_points - center)
-            normal = vh[2]  # 平面法向量
-            d = -np.dot(normal, center)
+            # 拟合平面
+            # # 拟合平面 ax + by + cz + d = 0
+            # center = np.mean(circle_points, axis=0)
+            # # 使用SVD进行平面拟合
+            # u, s, vh = np.linalg.svd(circle_points - center)
+            # normal = vh[2]  # 平面法向量
+            # d = -np.dot(normal, center)
+            normal, d = self.fit_plane(circle_points_3d)
             
             # 3. 计算中值点到平面的距离
             distance = np.abs(np.dot(normal, median_point) + d) / np.linalg.norm(normal)
@@ -454,14 +448,65 @@ class DepthToPointCloud:
                 'median_point': median_point,
                 'height': distance,
                 'plane_normal': normal,
-                'plane_d': d
+                'plane_d': d,
+                'circle_points_3d': circle_points_3d,
+                'circle_points_2d': circle_points_2d
             })
             
         return results
 
+    def fit_plane(self, points):
+        """
+        使用3D点集拟合平面，返回法向量和距离参数
+        
+        参数:
+        points: np.array, 形状为(N, 3)的点云数据
+        
+        返回:
+        normal: np.array, 归一化的平面法向量
+        d: float, 平面方程的距离参数
+        """
+        # 1. 使用最小二乘法获得初始解
+        A = np.column_stack((points[:, 0], points[:, 1], np.ones_like(points[:, 0])))
+        b = points[:, 2]
+        # 求解平面参数 [a, b, c]
+        params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
+        
+        # 获取初始平面参数
+        initial_normal = np.array([-params[0], -params[1], 1])
+        initial_normal = initial_normal / np.linalg.norm(initial_normal)
+        initial_d = -params[2]
+        
+        # 将最小二乘的结果作为优化的初始值
+        initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
+        
+        # 2. 使用optimize.minimize进行优化
+        def plane_error(params, points):
+            a, b, c, d = params
+            normal = np.array([a, b, c])
+            normal = normal / np.linalg.norm(normal)
+            distances = np.abs(np.dot(points, normal) + d)
+            return np.mean(distances ** 2)
+        
+        # 优化求解
+        result = optimize.minimize(
+            plane_error, 
+            initial_guess, 
+            args=(points,),
+            method='Nelder-Mead'
+        )
+        
+        # 3. 获取最终的平面参数
+        a, b, c, d = result.x
+        normal = np.array([a, b, c])
+        normal = normal / np.linalg.norm(normal)
+        d = d / np.linalg.norm(normal)
+        
+        return normal, d
+
 def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_prefix='output',
                         corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6,
-                        peak_window_size=7, around_peak_radius=14):
+                        peak_window_size=7, around_peak_radius=14, save_pointcloud=False):
     """
     处理单帧数据的函数
     
@@ -476,6 +521,7 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     peak_ratio: float, 峰值比例系数
     peak_window_size: int, 计算高度时的窗口大小
     around_peak_radius: int, 拟合平面时的圆半径
+    save_pointcloud: bool, 是否保存点云数据（默认False）
     
     返回:
     dict: 包含处理结果的字典
@@ -503,10 +549,11 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     # 转换为点云
     points_3d, points_2d = converter.convert_to_pointcloud(depth_image)
     
-    # 保存结果
-    pointcloud_3d_path = f'{output_prefix}_pointcloud_3d.txt'
-    pointcloud_2d_path = f'{output_prefix}_pointcloud_2d.txt'
-    converter.save_pointcloud(points_3d, points_2d, pointcloud_3d_path, pointcloud_2d_path)
+    # 根据开关决定是否保存点云
+    if save_pointcloud:
+        pointcloud_3d_path = f'{output_prefix}_pointcloud_3d.txt'
+        pointcloud_2d_path = f'{output_prefix}_pointcloud_2d.txt'
+        converter.save_pointcloud(points_3d, points_2d, pointcloud_3d_path, pointcloud_2d_path)
     
     # 检测半球顶点
     peaks_info_path = f'peaks_info.txt'
@@ -563,11 +610,6 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
         circle = plt.Circle((peak_x, peak_y), radius=1, color='red', fill=False)
         plt.gca().add_patch(circle)
 
-    plt.title('peaks visualization')
-    peaks_visualization_path = f'{output_prefix}_peaks_visualization.png'
-    plt.savefig(peaks_visualization_path)
-    plt.close()
-    
     # 计算半球顶点相对于平面的高度
     hemisphere_heights = converter.calculate_hemisphere_heights(
         peaks, 
@@ -576,6 +618,19 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
         window_size=peak_window_size, 
         r_pixel=around_peak_radius
     )
+    # 在裁剪后的图像上标记圆周点
+    for height_dict in hemisphere_heights:
+        # 获取2D圆周点
+        circle_points_2d = height_dict['circle_points_2d']
+        for point_2d in circle_points_2d:
+            circle = plt.Circle((point_2d[0] - x_offset, point_2d[1] - y_offset), radius=1, color='green', fill=False)
+            plt.gca().add_patch(circle)
+
+    
+    plt.title('peaks visualization')
+    peaks_visualization_path = f'{output_prefix}_peaks_visualization.png'
+    plt.savefig(peaks_visualization_path)
+    plt.close()
     
     # 在裁剪后的图像上标注半球高度
     plt.figure(figsize=(10, 8))
@@ -600,21 +655,21 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     
     # 更新返回结果
     results = {
-        'points_3d': points_3d,
-        'points_2d': points_2d,
-        'cropped_image': cropped_image,
-        'bbox': bbox,
-        'num_points': len(points_3d),
+        # 'points_3d': points_3d,
+        # 'points_2d': points_2d,
+        # 'cropped_image': cropped_image,
+        # 'bbox': bbox,
+        # 'num_points': len(points_3d),
         'hemisphere_peaks': peaks,
-        'hemisphere_heights': hemisphere_heights,
-        'output_files': {
-            'pointcloud_3d': pointcloud_3d_path,
-            'pointcloud_2d': pointcloud_2d_path,
-            'cropped_image': f'{output_prefix}_cropped_roi.png',
-            'cropped_image_with_vertices': f'{output_prefix}_cropped_roi_with_vertices.png',
-            'peaks_visualization': peaks_visualization_path,
-            'depth_visualization': f'{output_prefix}_depth_image.png'
-        }
+        'hemisphere_heights': hemisphere_heights
+        # 'output_files': {
+        #     'pointcloud_3d': pointcloud_3d_path,
+        #     'pointcloud_2d': pointcloud_2d_path,
+        #     'cropped_image': f'{output_prefix}_cropped_roi.png',
+        #     'cropped_image_with_vertices': f'{output_prefix}_cropped_roi_with_vertices.png',
+        #     'peaks_visualization': peaks_visualization_path,
+        #     'depth_visualization': f'{output_prefix}_depth_image.png'
+        # }
     }
     
     return results
@@ -698,24 +753,38 @@ def main():
     主函数示例
     """
     # 定义四边形顶点坐标
-    roi_vertices = np.array([
-        [2119, 2202],  # 左上角
-        [2149, 3065],  # 左下角
-        [2927, 3040],  # 右下角
-        [2895, 2159]   # 右上角
-    ])
-    
-    # 指定数据文件夹路径
-    data_folder = "./dataset/"  # 替换为你的实际文件夹路径
+    # center
+    # roi_vertices = np.array([
+    #     [2119, 2202],  # 左上角
+    #     [2149, 3065],  # 左下角
+    #     [2927, 3040],  # 右下角
+    #     [2895, 2159]   # 右上角
+    # ])
     # 寻找球顶点的参数
-    corner_window_size = 9
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 14
+    
+    # left-top
+    roi_vertices = np.array([
+        [101, 410],  # 左上角
+        [142, 1132],  # 左下角
+        [980, 1077],  # 右下角
+        [929, 336]   # 右上角
+    ])
+    # 寻找球顶点的参数
+    corner_window_size = 8
     cell_size = (5, 5)
     peak_ratio = 0.68
-    
     # 计算半球顶点高度参数
     peak_window_size = 7
-    around_peak_radius = 14
+    around_peak_radius = 17
     
+    # 指定数据文件夹路径
+    data_folder = "./dataset/" 
     # 处理文件夹中的所有数据
     try:
         process_folder(
