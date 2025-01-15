@@ -70,12 +70,18 @@ class DepthToPointCloud:
     
     def convert_to_pointcloud(self, depth_image):
         """将深度图转换为点云"""
-        height, width = depth_image.shape
+        # 计算ROI的最小外接矩形
+        min_x = int(np.min(self.vertices[:, 0]))
+        max_x = int(np.max(self.vertices[:, 0]))
+        min_y = int(np.min(self.vertices[:, 1]))
+        max_y = int(np.max(self.vertices[:, 1]))
+        
         points_3d = []
         points_2d = []  # 存储对应的2D坐标
-        # 添加进度条
-        for v in tqdm(range(height), desc="Converting to pointcloud"):
-            for u in range(width):
+        
+        # 只在最小外接矩形范围内遍历
+        for v in tqdm(range(min_y, max_y + 1), desc="Converting to pointcloud"):
+            for u in range(min_x, max_x + 1):
                 # 检查点是否在四边形内
                 if not self.is_point_in_polygon((u, v)):
                     continue
@@ -90,7 +96,7 @@ class DepthToPointCloud:
                 z = g * self.dz + self.oz
                 
                 points_3d.append([x, y, z])
-                points_2d.append([u, v])  # 保存对应的2D坐标
+                points_2d.append([u, v])
                 
         return np.array(points_3d), np.array(points_2d)
     
@@ -769,11 +775,26 @@ def main():
     # around_peak_radius = 14
     
     # left-top
+    # roi_vertices = np.array([
+    #     [101, 410],  # 左上角
+    #     [142, 1132],  # 左下角
+    #     [980, 1077],  # 右下角
+    #     [929, 336]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 8
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 17
+    
+    # right-top
     roi_vertices = np.array([
-        [101, 410],  # 左上角
-        [142, 1132],  # 左下角
-        [980, 1077],  # 右下角
-        [929, 336]   # 右上角
+        [3842, 289],  # 左上角
+        [3855, 1004],  # 左下角
+        [4688, 988],  # 右下角
+        [4666, 252]   # 右上角
     ])
     # 寻找球顶点的参数
     corner_window_size = 8
