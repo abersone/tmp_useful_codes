@@ -27,6 +27,7 @@ class DepthToPointCloud:
             [300, 300],  # 右下角
             [300, 100]   # 右上角
         ])
+        self.peaks_num = -1
         
     def is_point_in_polygon(self, point):
         """判断点是否在四边形内
@@ -75,7 +76,7 @@ class DepthToPointCloud:
         max_x = int(np.max(self.vertices[:, 0]))
         min_y = int(np.min(self.vertices[:, 1]))
         max_y = int(np.max(self.vertices[:, 1]))
-        
+
         points_3d = []
         points_2d = []  # 存储对应的2D坐标
         
@@ -196,7 +197,7 @@ class DepthToPointCloud:
             # 计算内缩11个像素的点
             inset_point = vertex + (corner_window_size + 2) * direction  # 向内移动11个像素
             inset_point = np.round(inset_point).astype(int)  # 四舍五入到整数坐标
-            print(f"内缩点坐标: {inset_point}")
+
             # 在内缩点周围取9x9的窗口
             for i in range(-corner_window_size // 2, corner_window_size // 2 + 1):
                 for j in range(-corner_window_size // 2, corner_window_size // 2 + 1):
@@ -220,41 +221,6 @@ class DepthToPointCloud:
         
         
         # 2. 拟合平面
-        # # 首先使用最小二乘法获得初始解
-        # A = np.column_stack((sample_points[:, 0], sample_points[:, 1], np.ones_like(sample_points[:, 0])))
-        # b = sample_points[:, 2]
-        # # 求解平面参数 [a, b, c]
-        # params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
-        
-        # # 获取初始平面参数
-        # initial_normal = np.array([-params[0], -params[1], 1])
-        # initial_normal = initial_normal / np.linalg.norm(initial_normal)
-        # initial_d = -params[2]
-        
-        # # 将最小二乘的结果作为优化的初始值
-        # initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
-        
-        # # 使用optimize.minimize进行优化
-        # def plane_error(params, points):
-        #     a, b, c, d = params
-        #     normal = np.array([a, b, c])
-        #     normal = normal / np.linalg.norm(normal)
-        #     distances = np.abs(np.dot(points, normal) + d)
-        #     return np.mean(distances ** 2)
-        
-        # # 优化求解
-        # result = optimize.minimize(
-        #     plane_error, 
-        #     initial_guess, 
-        #     args=(sample_points,),
-        #     method='Nelder-Mead'
-        # )
-        
-        # # 获取最终的平面参数
-        # a, b, c, d = result.x
-        # normal = np.array([a, b, c])
-        # normal = normal / np.linalg.norm(normal)
-        # d = d / np.linalg.norm(normal)
         normal, d = self.fit_plane(sample_points)
         
         # 3. 计算所有点到平面的距离
@@ -379,9 +345,9 @@ class DepthToPointCloud:
         cluster_visualization_path = f'{output_prefix}_cluster_visualization.png'
         cv2.imwrite(cluster_visualization_path, cluster_visualization)
         
-        # 7. 按到平面距离排序
+        # # 7. 按到平面距离排序
         peaks.sort(key=lambda x: x['height'], reverse=True)
-        
+
         return peaks
 
     def calculate_hemisphere_heights(self, peaks, points_3d, points_2d, window_size=7, r_pixel=14):
@@ -421,6 +387,8 @@ class DepthToPointCloud:
             # 计算中值点
             median_z = np.median(window_points[:, 2])
             median_point = window_points[np.argmin(np.abs(window_points[:, 2] - median_z))]
+            # 直接使用peak的3D坐标作为median_point
+            # median_point = peak['3d_coord']
             
             # 2. 获取圆周上的点
             circle_points_3d = []
@@ -510,9 +478,69 @@ class DepthToPointCloud:
         
         return normal, d
 
+    def sort_peaks_by_reference(self, peaks, reference_peaks_path, distance_threshold=5):
+        """
+        根据参考peaks文件对当前peaks进行排序
+        
+        参数:
+        peaks: list, 当前检测到的peaks列表
+        reference_peaks_path: str, 参考peaks文件路径
+        distance_threshold: float, 匹配时的距离阈值（默认5像素）
+        
+        返回:
+        list: 排序后的peaks列表
+        """
+        if not os.path.exists(reference_peaks_path):
+            return peaks
+            
+        # 读取参考peaks
+        existed_peaks = []
+        with open(reference_peaks_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                data = line.strip().split()
+                peak = {
+                    '2d_coord': (int(data[0]), int(data[1])),
+                    '3d_coord': np.array([float(data[2]), float(data[3]), float(data[4])]),
+                    'height': float(data[5]),
+                    'prominence': float(data[6]), 
+                    'cluster_size': int(data[7])
+                }
+                existed_peaks.append(peak)
+        print(f"从 {reference_peaks_path} 读取了 {len(existed_peaks)} 个peaks, 用于排序")
+        
+        # 根据参考peaks排序
+        sorted_peaks = []
+        peaks_to_sort = peaks.copy()  # 创建副本避免修改原始列表
+        
+        for existed_peak in existed_peaks:
+            ex_x, ex_y = existed_peak['2d_coord']
+            
+            # 寻找最近的peak
+            min_dist = float('inf')
+            closest_peak = None
+            closest_idx = -1
+            
+            for i, peak in enumerate(peaks_to_sort):
+                x, y = peak['2d_coord']
+                dist = np.sqrt((ex_x - x)**2 + (ex_y - y)**2)
+                if dist < min_dist and dist < distance_threshold:
+                    min_dist = dist
+                    closest_peak = peak
+                    closest_idx = i
+                    break
+            
+            if closest_peak is not None:
+                sorted_peaks.append(closest_peak)
+                peaks_to_sort.pop(closest_idx)
+            else:
+                sorted_peaks.append(existed_peak)
+                print(f"-------------------未匹配到peaks,使用已存在的peaks----------------")
+        
+        return sorted_peaks
+
 def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_prefix='output',
                         corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6,
-                        peak_window_size=7, around_peak_radius=14, save_pointcloud=False):
+                        peak_window_size=7, around_peak_radius=14, b_use_pre_peaks=False, peaks_info_path='peaks_info.txt', b_save_pointcloud=False):
     """
     处理单帧数据的函数
     
@@ -556,16 +584,14 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     points_3d, points_2d = converter.convert_to_pointcloud(depth_image)
     
     # 根据开关决定是否保存点云
-    if save_pointcloud:
+    if b_save_pointcloud:
         pointcloud_3d_path = f'{output_prefix}_pointcloud_3d.txt'
         pointcloud_2d_path = f'{output_prefix}_pointcloud_2d.txt'
         converter.save_pointcloud(points_3d, points_2d, pointcloud_3d_path, pointcloud_2d_path)
     
     # 检测半球顶点
-    peaks_info_path = f'peaks_info.txt'
-    
-    # 如果peaks_info文件存在,则直接读取
-    if os.path.exists(peaks_info_path):
+    # 如果peaks_info文件存在, 且b_use_pre_peaks为True, 则直接读取
+    if os.path.exists(peaks_info_path) and b_use_pre_peaks:
         peaks = []
         with open(peaks_info_path, 'r', encoding='utf-8') as f:
             for line in f:
@@ -578,9 +604,9 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
                     'cluster_size': int(data[7])
                 }
                 peaks.append(peak)
-        print(f"从 {peaks_info_path} 读取了 {len(peaks)} 个peaks")
+        print(f"从 {peaks_info_path} 读取了 {len(peaks)} 个peaks, 用于计算高度")
     else:
-        # 如果文件不存在,则调用find_hemisphere_peaks生成peaks
+        # 调用find_hemisphere_peaks生成peaks
         peaks = converter.find_hemisphere_peaks(
             points_3d=points_3d,
             points_2d=points_2d,
@@ -592,29 +618,34 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
             cell_size=cell_size,
             peak_ratio=peak_ratio
         )
-        # 保存peaks信息到文件
-        with open(peaks_info_path, 'w', encoding='utf-8') as f:
-            for peak in peaks:
-                f.write(f"{peak['2d_coord'][0]} {peak['2d_coord'][1]} ")
-                f.write(f"{peak['3d_coord'][0]} {peak['3d_coord'][1]} {peak['3d_coord'][2]} ")
-                f.write(f"{peak['height']} ")
-                f.write(f"{peak['prominence']} ")
-                f.write(f"{peak['cluster_size']}\n")
-        print(f"已将peaks信息保存至 {peaks_info_path}")
-    
+        if b_use_pre_peaks:
+             # 如果使用预先的peaks, 首帧保存peaks信息到文件
+            with open(peaks_info_path, 'w', encoding='utf-8') as f:
+                for peak in peaks:
+                    f.write(f"{peak['2d_coord'][0]} {peak['2d_coord'][1]} ")
+                    f.write(f"{peak['3d_coord'][0]} {peak['3d_coord'][1]} {peak['3d_coord'][2]} ")
+                    f.write(f"{peak['height']} ")
+                    f.write(f"{peak['prominence']} ")
+                    f.write(f"{peak['cluster_size']}\n")
+            print(f"已将peaks信息保存至 {peaks_info_path}")
+        else:
+            # 如果不使用预先的peaks,则需要按照某一个统一的reference_peaks进行排序
+            peaks = converter.sort_peaks_by_reference(peaks, peaks_info_path)
+            print(f"使用读取的peaks对检测到的peaks排序,共匹配到 {len(peaks)} 个peaks")
+        
     # 在裁剪后的图像上标记半球顶点位置
     plt.figure(figsize=(10, 8))
     plt.imshow(cropped_image)
-    print("检测到的半球顶点坐标:")
     print(f"检测到的半球顶点数量: {len(peaks)}")
     
     # 将peaks坐标转换为裁剪图像坐标系
     x_offset, y_offset = bbox[0], bbox[1]
-    for peak in peaks:
+    for i, peak in enumerate(peaks):
         peak_x = peak['2d_coord'][0] - x_offset  # 使用字典中的坐标
         peak_y = peak['2d_coord'][1] - y_offset
         circle = plt.Circle((peak_x, peak_y), radius=1, color='red', fill=False)
         plt.gca().add_patch(circle)
+        plt.text(peak_x + 5, peak_y + 5, str(i+1), color='red', fontsize=8)
 
     # 计算半球顶点相对于平面的高度
     hemisphere_heights = converter.calculate_hemisphere_heights(
@@ -680,7 +711,7 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     
     return results
 
-def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6, peak_window_size=7, around_peak_radius=14):
+def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6, peak_window_size=7, around_peak_radius=14, b_use_pre_peaks=False, peaks_info_path='peaks_info.txt', b_save_pointcloud=False):
     """
     处理指定文件夹中的所有数据
     
@@ -734,12 +765,17 @@ def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_wi
                 cell_size=cell_size,
                 peak_ratio=peak_ratio,
                 peak_window_size=peak_window_size,
-                around_peak_radius=around_peak_radius
+                around_peak_radius=around_peak_radius,
+                b_use_pre_peaks=b_use_pre_peaks,
+                peaks_info_path=peaks_info_path,
+                b_save_pointcloud=b_save_pointcloud
             )
             
             # 提取当前帧的高度信息
             frame_heights = [h['height'] for h in results['hemisphere_heights']]
             all_heights.append(frame_heights)
+            
+            
             
         except Exception as e:
             print(f"处理第 {idx} 帧时出错: {str(e)}")
@@ -766,7 +802,7 @@ def main():
     #     [2927, 3040],  # 右下角
     #     [2895, 2159]   # 右上角
     # ])
-    # 寻找球顶点的参数
+    # # 寻找球顶点的参数
     # corner_window_size = 9
     # cell_size = (5, 5)
     # peak_ratio = 0.68
@@ -803,21 +839,58 @@ def main():
     # 计算半球顶点高度参数
     peak_window_size = 7
     around_peak_radius = 17
-    
+
+    # right-bottom
+    # roi_vertices = np.array([
+    #     [3373, 3595],  # 左上角
+    #     [3261, 4316],  # 左下角
+    #     [4407, 4506],  # 右下角
+    #     [4526, 3749]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 8
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 27
+
+    # left-bottom
+    # roi_vertices = np.array([
+    #     [256, 3897],  # 左上角
+    #     [210, 4616],  # 左下角
+    #     [1040, 4661],  # 右下角
+    #     [1082, 3929]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 8
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 17
+
     # 指定数据文件夹路径
     data_folder = "./dataset/" 
+    peaks_info_path = f'peaks_info_right_top.txt'
+    b_use_pre_peaks = False
+    b_save_pointcloud = False
+ 
     # 处理文件夹中的所有数据
     try:
         process_folder(
             folder_path=data_folder,
             roi_vertices=roi_vertices,
             start_idx=1,
-            end_idx=50,
+            end_idx=1,
             corner_window_size=corner_window_size,
             cell_size=cell_size,
             peak_ratio=peak_ratio,
             peak_window_size=peak_window_size,
-            around_peak_radius=around_peak_radius
+            around_peak_radius=around_peak_radius,
+            b_use_pre_peaks=b_use_pre_peaks,
+            peaks_info_path=peaks_info_path,
+            b_save_pointcloud=b_save_pointcloud
         )
     except Exception as e:
         print(f"处理过程中出错: {str(e)}")
