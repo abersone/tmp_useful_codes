@@ -290,9 +290,18 @@ def process_dataset(base_dir, inner_area_thres, inner_cons_thres,
             
             # 保存结果
             if kept_labels:
+                # 将列表/数组转换为 numpy 数组
+                kept_labels = np.array(kept_labels, dtype=np.float32)
+                
+                # 第 0 列为类别，将其转换为 int 类型，以防保存为浮点数
+                kept_labels[:, 0] = kept_labels[:, 0].astype(int)
+                
+                # 定义保存格式，第 1 列(类别)使用整数格式，后续列(坐标等)使用浮点数
+                fmt_list = ['%d'] + ['%f']*(kept_labels.shape[1]-1)
+                
                 # 保存过滤后的标签
                 output_label_path = current_output_labels / f"{img_path.stem}.txt"
-                np.savetxt(str(output_label_path), kept_labels, fmt='%f')
+                np.savetxt(str(output_label_path), kept_labels, fmt=fmt_list)
                 
                 # 保存可视化结果
                 output_vis_path = current_output_vis / f"{img_path.stem}.jpg"
@@ -306,7 +315,8 @@ def main():
         return
     
     # 设置路径和参数
-    base_dir = "/mnt/nfs/AOI_detection/ccm/data/v6/after_screening/train_data/after_check/train_data_v6.1_yolo"
+    base_dir = "/mnt/nfs/AOI_detection/ccm/data/v6/after_screening/liuqin_data/test_dataset"
+    # base_dir = "/mnt/nfs/AOI_detection/ccm/data/v6/after_screening/hawk_data/v5_data"
     test_mode = False
     test_num = 20
     # 内部区域的阈值（靠近圆心）
