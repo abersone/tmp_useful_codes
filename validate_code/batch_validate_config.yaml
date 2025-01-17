@@ -1,0 +1,14 @@
+datasets:
+  - /mnt/nfs/AOI_detection/ccm/data/v6/after_screening/liuqin_data/test_dataset_transformed_cls2/dataset.yaml
+  #- /mnt/nfs/AOI_detection/ccm/data/v6/after_screening/test_data/after_check/after_check_yolo_v1/dataset.yaml
+
+  
+models:
+  #- path: /mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_with_syn/20250110_152451/exp_s_2560_20250110_152451/train/weights/best.pt
+  #- path: /mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_with_syn_only_train/20250110_165019/exp_s_2560_20250110_165019/train/weights/best.pt
+  #- path: /mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_without_syn/20250110_152955/exp_s_2560_20250110_152955/train/weights/best.pt
+  #- path: /mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_with_syn_trans_cls2/20250115_153557/exp_s_2560_20250115_153557/train/weights/best.pt
+  - path: /mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_without_syn_trans_cls2/20250115_153824/exp_s_2560_20250115_153824/train/weights/best.pt
+    imgsz: 2560
+
+output_csv: validation_results.csv

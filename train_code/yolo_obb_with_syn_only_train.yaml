@@ -1,0 +1,26 @@
+# 模型配置
+model_size: 's'  # 可选 'n', 's', 'm', 'l', 'x'
+model_path: 'yolo11s-obb.pt'  # 添加这一行，指定模型路径
+img_size: 2560
+pretrained: true
+
+# 数据集配置
+data_yaml: '/mnt/nfs/AOI_detection/ccm/data/v6/after_screening/liuqin_data/train_data_sampling_yolo_with_synthesis_only_train/dataset.yaml'
+
+# 训练参数
+epochs: 400
+batch_size: 12
+device: '3'  # 使用 GPU device
+early_stopping_patience: 0
+#classes: [0]
+degrees: 180.0   # -180~180度随机旋转
+scale: 0.0         # 关闭缩放
+translate: 0.0     # 关闭平移
+fliplr: 0.0        # 关闭水平翻转
+flipud: 0.0        # 关闭垂直翻转
+mosaic: 0.0        # 关闭mosaic
+mixup: 0.0         # 关闭
+cfg: #'/mnt/nfs/AOI_detection/ccm/data/v5/false_alarm_v5/runs/obb/tune6/best_hyperparameters.yaml'
+
+# 输出配置
+output_base_dir: '/mnt/nfs/AOI_detection/ccm/models/v6/yolo11s_obb_2560/liuqin_debug/yolo11s_obb_with_syn_only_train'
