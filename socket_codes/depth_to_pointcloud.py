@@ -12,6 +12,56 @@ from sklearn.cluster import DBSCAN
 import cv2
 from scipy import optimize
 
+def fit_plane(points):
+    """
+    使用3D点集拟合平面，返回法向量和距离参数
+    
+    参数:
+    points: np.array, 形状为(N, 3)的点云数据
+    
+    返回:
+    normal: np.array, 归一化的平面法向量
+    d: float, 平面方程的距离参数
+    """
+    # 1. 使用最小二乘法获得初始解
+    A = np.column_stack((points[:, 0], points[:, 1], np.ones_like(points[:, 0])))
+    b = points[:, 2]
+    # 求解平面参数 [a, b, c]
+    params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
+    
+    # 获取初始平面参数
+    initial_normal = np.array([-params[0], -params[1], 1])
+    initial_normal = initial_normal / np.linalg.norm(initial_normal)
+    initial_d = -params[2]
+    
+    # 将最小二乘的结果作为优化的初始值
+    initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
+    
+    # 2. 使用optimize.minimize进行优化
+    def plane_error(params, points):
+        a, b, c, d = params
+        normal = np.array([a, b, c])
+        normal = normal / np.linalg.norm(normal)
+        distances = np.abs(np.dot(points, normal) + d)
+        return np.mean(distances ** 2)
+    
+    # 优化求解
+    result = optimize.minimize(
+        plane_error, 
+        initial_guess, 
+        args=(points,),
+        method='Nelder-Mead'
+    )
+    
+    # 3. 获取最终的平面参数
+    a, b, c, d = result.x
+    normal = np.array([a, b, c])
+    normal = normal / np.linalg.norm(normal)
+    d = d / np.linalg.norm(normal)
+    
+    return normal, d
+
+
 class DepthToPointCloud:
     def __init__(self, vertices=None):
         self.ox = 0.0
@@ -69,13 +119,13 @@ class DepthToPointCloud:
         """读取32位深度图像"""
         return np.array(Image.open(tiff_path))
     
-    def convert_to_pointcloud(self, depth_image):
+    def convert_to_pointcloud(self, depth_image, bbox):
         """将深度图转换为点云"""
         # 计算ROI的最小外接矩形
-        min_x = int(np.min(self.vertices[:, 0]))
-        max_x = int(np.max(self.vertices[:, 0]))
-        min_y = int(np.min(self.vertices[:, 1]))
-        max_y = int(np.max(self.vertices[:, 1]))
+        min_x = bbox[0]
+        max_x = bbox[0] + bbox[2]
+        min_y = bbox[1]
+        max_y = bbox[1] + bbox[3]
 
         points_3d = []
         points_2d = []  # 存储对应的2D坐标
@@ -221,7 +271,7 @@ class DepthToPointCloud:
         
         
         # 2. 拟合平面
-        normal, d = self.fit_plane(sample_points)
+        normal, d = fit_plane(sample_points)
         
         # 3. 计算所有点到平面的距离
         distances = np.abs(np.dot(points_3d, normal) + d) / np.linalg.norm(normal)
@@ -231,7 +281,6 @@ class DepthToPointCloud:
         # peak_candidates_3d = points_3d[peak_candidates_mask]
         # peak_candidates_2d = points_2d[peak_candidates_mask]
         x0, y0, width, height = bbox
-        cell_size = (5, 5)
         cell_width = width // cell_size[0]
         cell_height = height // cell_size[1]
         
@@ -305,8 +354,8 @@ class DepthToPointCloud:
         
         # 6. 处理每个聚类，找出局部最高点
         peaks = []
-        # 创建4704*4704的纯黑三通道图像
-        cluster_visualization = np.zeros((4704, 4704, 3), dtype=np.uint8)
+        # 创建6448*6448的纯黑三通道图像
+        cluster_visualization = np.zeros((6448, 6448, 3), dtype=np.uint8)
         
         for label in set(labels):
             if label == -1:  # 跳过噪声点
@@ -317,18 +366,29 @@ class DepthToPointCloud:
             cluster_points_3d = peak_candidates_3d[cluster_mask]
             cluster_points_2d = peak_candidates_2d[cluster_mask]
             
+            # 如果聚类点数太少,跳过该聚类
+            if len(cluster_points_2d) < 1: # 300
+                continue
+            
             # 为当前聚类随机生成颜色 (避免太暗的颜色)
             color = np.random.randint(50, 255, size=3, dtype=np.uint8)
             
             # 在可视化图像上标记当前聚类的点
             for x, y in cluster_points_2d.astype(int):
-                if 0 <= x < 4704 and 0 <= y < 4704:  # 确保坐标在图像范围内
+                if 0 <= x < 6448 and 0 <= y < 6448:  # 确保坐标在图像范围内
                     cluster_visualization[y, x] = color
             
             # 找出聚类中Z值最大的点作为顶点
             max_z_idx = np.argmax(cluster_points_3d[:, 2])  # 使用Z坐标（第3列）
             peak_3d = cluster_points_3d[max_z_idx]
             peak_2d = cluster_points_2d[max_z_idx]
+            # 计算聚类的重心作为顶点
+            # peak_2d = np.mean(cluster_points_2d, axis=0)
+            # # 找到最接近重心的实际点
+            # distances = np.linalg.norm(cluster_points_2d - peak_2d, axis=1)
+            # closest_idx = np.argmin(distances)
+            # peak_2d = cluster_points_2d[closest_idx]
+            # peak_3d = cluster_points_3d[closest_idx]
             
             # 计算该点到平面的距离作为高度
             distance = np.abs(np.dot(peak_3d, normal) + d) / np.linalg.norm(normal)
@@ -372,25 +432,7 @@ class DepthToPointCloud:
         for peak in peaks:
             peak_x, peak_y = peak['2d_coord']
             
-            # 1. 获取窗口内的点
-            window_points = []
-            for i in range(-half_window, half_window + 1):
-                for j in range(-half_window, half_window + 1):
-                    x, y = peak_x + i, peak_y + j
-                    if (x, y) in point_map:
-                        window_points.append(point_map[(x, y)])
-            
-            if not window_points:
-                continue
-            
-            window_points = np.array(window_points)
-            # 计算中值点
-            median_z = np.median(window_points[:, 2])
-            median_point = window_points[np.argmin(np.abs(window_points[:, 2] - median_z))]
-            # 直接使用peak的3D坐标作为median_point
-            # median_point = peak['3d_coord']
-            
-            # 2. 获取圆周上的点
+            # 1. 获取圆周上的点
             circle_points_3d = []
             circle_points_2d = []
             for theta in np.linspace(0, 2*np.pi, 36):  # 每10度采样一个点
@@ -412,11 +454,28 @@ class DepthToPointCloud:
             # u, s, vh = np.linalg.svd(circle_points - center)
             # normal = vh[2]  # 平面法向量
             # d = -np.dot(normal, center)
-            normal, d = self.fit_plane(circle_points_3d)
+            normal, d = fit_plane(circle_points_3d)
             
-            # 3. 计算中值点到平面的距离
-            distance = np.abs(np.dot(normal, median_point) + d) / np.linalg.norm(normal)
             
+            # 2. 获取窗口内的点
+            window_points = []
+            for i in range(-half_window, half_window + 1):
+                for j in range(-half_window, half_window + 1):
+                    x, y = peak_x + i, peak_y + j
+                    if (x, y) in point_map:
+                        window_points.append(point_map[(x, y)])
+            
+            if not window_points:
+                continue
+            
+            window_points = np.array(window_points)
+            # 计算每个点到平面的距离
+            distances = np.abs(np.dot(window_points, normal) + d) / np.linalg.norm(normal)
+            # 取距离的中值作为最终高度
+            distance = np.median(distances)
+            # 找到距离最接近中值的点作为median_point
+            median_point = window_points[np.argmin(np.abs(distances - distance))]
+
             results.append({
                 'peak_coord': peak['2d_coord'],
                 'median_point': median_point,
@@ -428,55 +487,6 @@ class DepthToPointCloud:
             })
             
         return results
-
-    def fit_plane(self, points):
-        """
-        使用3D点集拟合平面，返回法向量和距离参数
-        
-        参数:
-        points: np.array, 形状为(N, 3)的点云数据
-        
-        返回:
-        normal: np.array, 归一化的平面法向量
-        d: float, 平面方程的距离参数
-        """
-        # 1. 使用最小二乘法获得初始解
-        A = np.column_stack((points[:, 0], points[:, 1], np.ones_like(points[:, 0])))
-        b = points[:, 2]
-        # 求解平面参数 [a, b, c]
-        params, residuals, rank, s = np.linalg.lstsq(A, b, rcond=None)
-        
-        # 获取初始平面参数
-        initial_normal = np.array([-params[0], -params[1], 1])
-        initial_normal = initial_normal / np.linalg.norm(initial_normal)
-        initial_d = -params[2]
-        
-        # 将最小二乘的结果作为优化的初始值
-        initial_guess = [initial_normal[0], initial_normal[1], initial_normal[2], initial_d]
-        
-        # 2. 使用optimize.minimize进行优化
-        def plane_error(params, points):
-            a, b, c, d = params
-            normal = np.array([a, b, c])
-            normal = normal / np.linalg.norm(normal)
-            distances = np.abs(np.dot(points, normal) + d)
-            return np.mean(distances ** 2)
-        
-        # 优化求解
-        result = optimize.minimize(
-            plane_error, 
-            initial_guess, 
-            args=(points,),
-            method='Nelder-Mead'
-        )
-        
-        # 3. 获取最终的平面参数
-        a, b, c, d = result.x
-        normal = np.array([a, b, c])
-        normal = normal / np.linalg.norm(normal)
-        d = d / np.linalg.norm(normal)
-        
-        return normal, d
 
     def sort_peaks_by_reference(self, peaks, reference_peaks_path, distance_threshold=5):
         """
@@ -547,13 +557,14 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     参数:
     ini_path: 配置文件路径 (例如: '1.ini')
     tiff_path: 深度图路径 (例如: '1.tiff')
-    png_path: RGB图像路径 (例如: '1.png')
+    png_path: RGB图像路径 (例如: '1_0.png')
     roi_vertices: ROI顶点坐标 numpy数组
     output_prefix: 输出文件前缀 (默认: 'output')
-    corner_window_size: int, 角点窗口大小
+    corner_window_size: int, 角点窗口大小, 用于拟合全局底平面, 以寻找半球顶点
     cell_size: tuple, 子区域划分大小 (行数, 列数)
     peak_ratio: float, 峰值比例系数
     peak_window_size: int, 计算高度时的窗口大小
+
     around_peak_radius: int, 拟合平面时的圆半径
     save_pointcloud: bool, 是否保存点云数据（默认False）
     
@@ -581,7 +592,7 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     cropped_image, bbox = converter.crop_roi_from_image(png_path, output_prefix)
     
     # 转换为点云
-    points_3d, points_2d = converter.convert_to_pointcloud(depth_image)
+    points_3d, points_2d = converter.convert_to_pointcloud(depth_image, bbox)
     
     # 根据开关决定是否保存点云
     if b_save_pointcloud:
@@ -690,6 +701,26 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     plt.savefig(heights_visualization_path)
     plt.close()
     
+    # 拟合平面，并求距离
+    # 从hemisphere_heights中提取所有median_points
+    median_points = np.array([h['median_point'] for h in hemisphere_heights])
+    if len(median_points) >= 3:  # 需要至少3个点来拟合平面
+        normal, d = fit_plane(median_points)        
+        # 计算每个median_point到拟合平面的距离
+        for i, height_dict in enumerate(hemisphere_heights):
+            median_point = height_dict['median_point']
+            
+            # 计算点到平面的距离
+            distance_to_median_point_plane = np.abs(np.dot(median_point, normal) + d) / np.linalg.norm(normal)
+            # 将距离添加到height_dict中
+            hemisphere_heights[i]['distance_to_median_point_plane'] = distance_to_median_point_plane
+            
+        print("已计算所有median_points到拟合平面的距离")
+    else:
+        print("median_points数量不足,无法拟合平面")
+    
+    
+    
     # 更新返回结果
     results = {
         # 'points_3d': points_3d,
@@ -711,7 +742,7 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, output_pre
     
     return results
 
-def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6, peak_window_size=7, around_peak_radius=14, b_use_pre_peaks=False, peaks_info_path='peaks_info.txt', b_save_pointcloud=False):
+def process_folder(folder_path, output_folder, roi_vertices, start_idx=1, end_idx=50, corner_window_size=9, cell_size=(5, 5), peak_ratio=0.6, peak_window_size=7, around_peak_radius=14, b_use_pre_peaks=False, peaks_info_path='peaks_info.txt', b_save_pointcloud=False):
     """
     处理指定文件夹中的所有数据
     
@@ -730,12 +761,11 @@ def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_wi
     folder_path = str(Path(folder_path))
     
     # 创建输出文件夹
-    output_folder = Path(folder_path) / "results"
     output_folder.mkdir(exist_ok=True)
     
     # 创建一个列表存储所有帧的高度信息
     all_heights = []
-    
+    all_dist_to_median_point_plane = []
     # 处理每一帧数据
     for idx in range(start_idx, end_idx + 1):
         print(f"\n处理第 {idx} 帧...")
@@ -775,7 +805,9 @@ def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_wi
             frame_heights = [h['height'] for h in results['hemisphere_heights']]
             all_heights.append(frame_heights)
             
-            
+            # 提取当前帧到中点平面的距离信息
+            frame_dist_to_median_point_plane = [h['distance_to_median_point_plane'] for h in results['hemisphere_heights']]
+            all_dist_to_median_point_plane.append(frame_dist_to_median_point_plane)
             
         except Exception as e:
             print(f"处理第 {idx} 帧时出错: {str(e)}")
@@ -783,6 +815,7 @@ def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_wi
             # 获取第一个成功处理的帧中半球的数量作为基准
             base_count = next((len(h) for h in all_heights if len(h) > 0), 0)
             all_heights.append([np.nan] * base_count)
+            all_dist_to_median_point_plane.append([np.nan] * base_count)
             continue
     
     # 将所有高度信息保存为CSV文件
@@ -790,10 +823,16 @@ def process_folder(folder_path, roi_vertices, start_idx=1, end_idx=50, corner_wi
     np.savetxt(heights_path, all_heights, delimiter=',', fmt='%.6f')
     print(f"\n高度数据已保存至: {heights_path}")
 
+    # 将所有到中点平面的距离信息保存为CSV文件
+    dist_to_median_point_plane_path = str(output_folder / "dist_to_plane_data.csv")
+    np.savetxt(dist_to_median_point_plane_path, all_dist_to_median_point_plane, delimiter=',', fmt='%.6f')
+    print(f"\n到中点平面的距离数据已保存至: {dist_to_median_point_plane_path}")
+
 def main():
     """
     主函数示例
     """
+    # -----------------2500w camera-----------------
     # 定义四边形顶点坐标
     # center
     # roi_vertices = np.array([
@@ -826,19 +865,19 @@ def main():
     # around_peak_radius = 17
     
     # right-top
-    roi_vertices = np.array([
-        [3842, 289],  # 左上角
-        [3855, 1004],  # 左下角
-        [4688, 988],  # 右下角
-        [4666, 252]   # 右上角
-    ])
-    # 寻找球顶点的参数
-    corner_window_size = 8
-    cell_size = (5, 5)
-    peak_ratio = 0.68
-    # 计算半球顶点高度参数
-    peak_window_size = 7
-    around_peak_radius = 17
+    # roi_vertices = np.array([
+    #     [3842, 289],  # 左上角
+    #     [3855, 1004],  # 左下角
+    #     [4688, 988],  # 右下角
+    #     [4666, 252]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 8
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 17
 
     # right-bottom
     # roi_vertices = np.array([
@@ -870,19 +909,256 @@ def main():
     # peak_window_size = 7
     # around_peak_radius = 17
 
+    # -----------------6500w camera-----------------
+
+    # left-top
+    # roi_vertices = np.array([
+    #     [496, 578],  # 左上角
+    #     [506, 1831],  # 左下角
+    #     [1910, 1799],  # 右下角
+    #     [1916, 569]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 23
+    
+    # left-bottom
+    # roi_vertices = np.array([
+    #     [375, 4821],  # 左上角
+    #     [375, 6100],  # 左下角
+    #     [2312, 6065],  # 右下角
+    #     [2339, 4811]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 53
+    
+    # # center
+    # roi_vertices = np.array([
+    #     [2196, 2940],  # 左上角
+    #     [2207, 4186],  # 左下角
+    #     [3600, 4156],  # 右下角
+    #     [3602, 2937]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 23
+    
+    # right-top
+    # roi_vertices = np.array([
+    #     [3958, 496],  # 左上角
+    #     [3982, 1794],  # 左下角
+    #     [5916, 1730],  # 右下角
+    #     [5926, 467]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 50
+    
+    # right-bottom
+    # roi_vertices = np.array([
+    #     [3805, 4733],  # 左上角
+    #     [3786, 6025],  # 左下角
+    #     [5720, 6016],  # 右下角
+    #     [5769, 4756]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 45
+    
+    # -----------------6500w camera_2nd------------
+    # center
+    # roi_vertices = np.array([
+    #     [2009, 2405],  # 左上角
+    #     [2053, 3654],  # 左下角
+    #     [3456, 3590],  # 右下角
+    #     [3427, 2366]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 23
+    
+    # left top
+    # roi_vertices = np.array([
+    #     [217, 926],  # 左上角
+    #     [275, 2146],  # 左下角
+    #     [1655, 2080],  # 右下角
+    #     [1604, 866]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 23
+    
+    # left bottom
+    # roi_vertices = np.array([
+    #     [190, 4285],  # 左上角
+    #     [181, 5552],  # 左下角
+    #     [2110, 5569],  # 右下角
+    #     [2154, 4311]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 50
+    
+    # right-top
+    # roi_vertices = np.array([
+    #     [3707, 855],  # 左上角
+    #     [3724, 2161],  # 左下角
+    #     [5665, 2103],  # 右下角
+    #     [5689, 823]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 45
+    
+    # right-bottom
+    # roi_vertices = np.array([
+    #     [3991, 4082],  # 左上角
+    #     [3983, 5369],  # 左下角
+    #     [5906, 5377],  # 右下角
+    #     [5953, 4117]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 52
+    
+    # -----------------6500w camera_3rd------------
+    # center
+    # key = "center"
+    # roi_vertices = np.array([
+    #     [2262, 2614],  # 左上角
+    #     [2221, 3825],  # 左下角
+    #     [3638, 3868],  # 右下角
+    #     [3655, 2622]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 25
+    
+    # # left top
+    # key = "left_top"
+    # roi_vertices = np.array([
+    #     [546, 662],  # 左上角
+    #     [474, 1903],  # 左下角
+    #     [2439, 1976],  # 右下角
+    #     [2471, 690]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 53
+    
+    # # left bottom
+    # key = "left_bottom"
+    # roi_vertices = np.array([
+    #     [512, 4506],  # 左上角
+    #     [551, 5746],  # 左下角
+    #     [2510, 5724],  # 右下角
+    #     [2493, 4440]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 53
+    
+    # # right-top
+    # key = "right_top"
+    # roi_vertices = np.array([
+    #     [4126, 741],  # 左上角
+    #     [4091, 1959],  # 左下角
+    #     [5508, 1989],  # 右下角
+    #     [5529, 747]   # 右上角
+    # ])
+    # # 寻找球顶点的参数
+    # corner_window_size = 9
+    # cell_size = (5, 5)
+    # peak_ratio = 0.68
+    # # 计算半球顶点高度参数
+    # peak_window_size = 7
+    # around_peak_radius = 25
+    
+    # right-bottom
+    key = "right_bottom"
+    roi_vertices = np.array([
+        [4040, 4558],  # 左上角
+        [3985, 5820],  # 左下角
+        [5952, 5848],  # 右下角
+        [5971, 4564]   # 右上角
+    ])
+    # 寻找球顶点的参数
+    corner_window_size = 9
+    cell_size = (5, 5)
+    peak_ratio = 0.68
+    # 计算半球顶点高度参数
+    peak_window_size = 7
+    around_peak_radius = 53
+    # ---------------------------------------------
+    
     # 指定数据文件夹路径
-    data_folder = "./dataset/" 
-    peaks_info_path = f'peaks_info_right_top.txt'
-    b_use_pre_peaks = False
-    b_save_pointcloud = False
+    data_folder = "./dataset3/" 
+    output_folder = Path(data_folder) / f"results_{key}"
+    peaks_info_path = f'peaks_info_{key}.txt'
+    b_use_pre_peaks = True
+    b_save_pointcloud = True
  
     # 处理文件夹中的所有数据
     try:
         process_folder(
             folder_path=data_folder,
+            output_folder=output_folder,
             roi_vertices=roi_vertices,
             start_idx=1,
-            end_idx=1,
+            end_idx=40,
             corner_window_size=corner_window_size,
             cell_size=cell_size,
             peak_ratio=peak_ratio,
