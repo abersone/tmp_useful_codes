@@ -23,6 +23,7 @@ class DepthToPointCloud:
             [300, 100]   # 右上角
         ])
         self.peaks_num = -1
+        self.depth_image = None
         
     def is_point_in_polygon(self, point):
         """判断点是否在四边形内
@@ -62,15 +63,22 @@ class DepthToPointCloud:
         
     def read_depth_image(self, tiff_path):
         """读取32位深度图像"""
-        return np.array(Image.open(tiff_path))
+        self.depth_image = np.array(Image.open(tiff_path))
+        return self.depth_image
     
-    def convert_to_pointcloud(self, depth_image, bbox):
+    def convert_to_pointcloud(self, bbox=[]):
         """将深度图转换为点云"""
         # 计算ROI的最小外接矩形
-        min_x = bbox[0]
-        max_x = bbox[0] + bbox[2]
-        min_y = bbox[1]
-        max_y = bbox[1] + bbox[3]
+        if len(bbox) == 4:
+            min_x = bbox[0]
+            max_x = bbox[0] + bbox[2]
+            min_y = bbox[1]
+            max_y = bbox[1] + bbox[3]
+        else:
+            min_x = int(np.min(self.vertices[:, 0]))
+            max_x = int(np.max(self.vertices[:, 0]))
+            min_y = int(np.min(self.vertices[:, 1]))
+            max_y = int(np.max(self.vertices[:, 1]))
 
         points_3d = []
         points_2d = []  # 存储对应的2D坐标
@@ -81,7 +89,7 @@ class DepthToPointCloud:
                 # 检查点是否在四边形内
                 if not self.is_point_in_polygon((u, v)):
                     continue
-                g = depth_image[v, u]
+                g = self.depth_image[v, u]
                 # 跳过深度值为0的点
                 if g == 0:
                     continue
@@ -90,7 +98,7 @@ class DepthToPointCloud:
                 x = u * self.dx + self.ox
                 y = v * self.dy + self.oy
                 z = g * self.dz + self.oz
-                
+                y = -y
                 points_3d.append([x, y, z])
                 points_2d.append([u, v])
                 
@@ -152,6 +160,40 @@ class DepthToPointCloud:
         cropped_img.save(cropped_path)
         
         return cropped_image, (min_x, min_y, max_x - min_x, max_y - min_y)
+
+    def convert_single_point(self, point_2d):
+        """
+        将单个2D点转换为3D坐标
+        
+        参数:
+             point_2d: 二维坐标 [u, v] 或 (u, v)
+        
+        返回:
+             numpy数组: 三维坐标 [x, y, z]，如果无效则返回None
+        """
+        # 转换为整数坐标
+        u = int(round(point_2d[0]))
+        v = int(round(point_2d[1]))
+        
+        # 检查坐标有效性
+        if not (0 <= v < self.depth_image.shape[0] and 0 <= u < self.depth_image.shape[1]):
+            return None
+        
+        # 检查点是否在ROI多边形内
+        if not self.is_point_in_polygon((u, v)):
+            return None
+        
+        # 获取深度值
+        g = self.depth_image[v, u]
+        if g == 0:
+            return None
+        
+        # 计算3D坐标
+        x = u * self.dx + self.ox
+        y = v * self.dy + self.oy
+        z = g * self.dz + self.oz
+        y = -y
+        return np.array([x, y, z])
 
 def main():
     pass
