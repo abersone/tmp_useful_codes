@@ -21,7 +21,6 @@ def calc_mask_and_medline(txt_path, width, height, detect_method=3):
             # 按空格分割 (class_label, x1, y1, x2, y2, ...)
             coords = line.split()
             xy_vals = coords[1:]     # 从第二个数起为多边形坐标
-            print(f"当前文件包含 {len(xy_vals)} 个坐标")
             if len(xy_vals) < 4:
                 # 至少要有(x, y)一对才可绘制多边形
                 continue
