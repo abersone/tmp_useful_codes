@@ -140,7 +140,7 @@ def draw_polygon_annotations(mask_txt_path, png_path, depth_image, width, height
     if img_depth is not None:
         cv2.imwrite(f'{output_prefix}_polygon_depth.png', img_depth)
 
-def plot_3d_points_with_endpoints(wire_features, output_prefix, b_draw_direction=True, b_draw_endpoints=True):
+def plot_3d_wire_sections(wire_features, output_prefix, b_draw_direction=True, b_draw_endpoints=True, occlusion_points=None):
     """
     改进版三维可视化函数
     参数:
@@ -150,6 +150,10 @@ def plot_3d_points_with_endpoints(wire_features, output_prefix, b_draw_direction
             - tail: np.array 尾部端点坐标
         output_prefix: str 输出文件前缀
     """
+    # 初始化处理
+    if occlusion_points is None:
+        occlusion_points = []  # 转换为空列表
+    
     # 初始化图形
     fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot(111, projection='3d')
@@ -204,7 +208,7 @@ def plot_3d_points_with_endpoints(wire_features, output_prefix, b_draw_direction
                   zorder=4)
 
         # 绘制端点连线（虚线）
-        if b_draw_direction:
+        if 0:
             ax.plot([head[0], tail[0]], 
                [head[1], tail[1]], 
                [head[2], tail[2]],
@@ -246,13 +250,62 @@ def plot_3d_points_with_endpoints(wire_features, output_prefix, b_draw_direction
         Patch(facecolor='gray', alpha=0.5, label='Point Cloud')
     ]
     ax.legend(handles=legend_elements, loc='upper left', fontsize=10)
-
+    # 修改后的遮挡点绘制逻辑
+    if occlusion_points:  # 自动处理空列表和None的情况
+        # 统一转换为numpy数组
+        occlusion_array = np.array(occlusion_points)
+        ax.scatter(occlusion_array[:,0], 
+                  occlusion_array[:,1],
+                  occlusion_array[:,2],
+                  c='red', 
+                  marker='*', 
+                  s=80,
+                  edgecolor='black',
+                  linewidth=0.8,
+                  alpha=0.9,
+                  zorder=5,
+                  label='Occlusion Points')
     # 保存输出
-    plt.savefig(f'{output_prefix}_wire_endpoints_3d.png', 
+    plt.savefig(f'{output_prefix}_wire_3d.png', 
                dpi=300, 
                bbox_inches='tight',
                transparent=True)
     plt.close()
+
+def visualize_merged_wires(wire_groups, output_prefix, b_draw_endpoints=True, b_draw_direction=True, occlusion_points=None):
+    # 准备可视化数据
+    merged_features = []
+    for group in wire_groups:
+        if not group:
+            continue
+            
+        # 合并点云
+        merged_pts = np.concatenate([seg['points'] for seg in group], axis=0)
+        
+        # 计算主方向
+        main_dir = compute_pca_direction(merged_pts)
+        
+        # 确定端点（考虑方向一致性）
+        first_seg = group[0]
+        last_seg = group[-1]
+        head = first_seg['head'] if np.dot(main_dir, first_seg['tail'] - first_seg['head']) > 0 else first_seg['tail']
+        tail = last_seg['tail'] if np.dot(main_dir, last_seg['tail'] - last_seg['head']) > 0 else last_seg['head']
+
+        merged_features.append({
+            'points': merged_pts,
+            'direction': main_dir,
+            'head': head,
+            'tail': tail
+        })
+
+    # 生成可视化图表
+    plot_3d_wire_sections(
+        merged_features, 
+        f"{output_prefix}", 
+        b_draw_direction=b_draw_direction,  # 显示方向箭头
+        b_draw_endpoints=b_draw_endpoints,   # 显示端点标记
+        occlusion_points=occlusion_points
+    )
 
 def compute_pca_direction(points):
     cov_matrix = np.cov(points.T)
@@ -354,13 +407,19 @@ def merge_golden_wires(golden_wire_medlines_3d, dist_threshold=0.1, output_prefi
         # 计算主方向
         direction = compute_pca_direction(points)
  
-        # 确定端点（头部和尾部）
+        # 确定端点（头部和尾部）：取距离均值最近的真实点
         points_num = len(points)
         select_num = int(points_num * 0.2)
-        head_points = points[:select_num]  # 取前3个点计算头部
-        tail_points = points[-select_num:] # 取后3个点计算尾部
-        head_center = np.mean(head_points, axis=0)
-        tail_center = np.mean(tail_points, axis=0)
+        head_points = points[:select_num]  # 取前select_num个点计算头部
+        tail_points = points[-select_num:] # 取后select_num个点计算尾部
+
+        head_center_mean = np.mean(head_points, axis=0)
+        distances = np.linalg.norm(head_points - head_center_mean, axis=1)
+        head_center = head_points[np.argmin(distances)]
+               
+        tail_center_mean = np.mean(tail_points, axis=0)
+        distances = np.linalg.norm(tail_points - tail_center_mean, axis=1)
+        tail_center = tail_points[np.argmin(distances)]
         
         # 确保方向向量指向尾部
         if np.dot(direction, tail_center - head_center) < 0:
@@ -373,7 +432,7 @@ def merge_golden_wires(golden_wire_medlines_3d, dist_threshold=0.1, output_prefi
             'tail': tail_center
         })
         
-    plot_3d_points_with_endpoints(wire_features, output_prefix)
+    plot_3d_wire_sections(wire_features, output_prefix+"_sections")
     #return [] # test
     # 步骤2：构建连接关系图
     connections = []
@@ -462,42 +521,98 @@ def merge_golden_wires(golden_wire_medlines_3d, dist_threshold=0.1, output_prefi
             current_group = [seg for _, seg in sorted(zip(projections, current_group))]
 
         wire_groups.append(current_group)    
-    
-    if 1:
-        # 打印wire_groups 结构参数  
-        print(f"wire_groups 的数量: {len(wire_groups)}")
-        for idx, group in enumerate(wire_groups):
-            print(f"第 {idx+1} 组包含线段数量: {len(group)}")
-            #for jdx, segment in enumerate(group):
-                #print(f"  第 {idx+1} 组 - 第 {jdx+1} 条线段包含的点数: {len(segment['points'])}")
- 
-        # 画出金线合并后的3D 示意图
-        merged_features_for_plot = []
-        for group in wire_groups:
-            if not group:
-                continue
-                
-            # 合并所有点云
-            merged_points = np.concatenate([seg['points'] for seg in group], axis=0)
-            
-            # 计算新的主方向
-            merged_direction = compute_pca_direction(merged_points)
-            
-            # 确定新的端点（取整个点云的首尾）
-            head = group[0]['head'] if np.dot(merged_direction, group[0]['tail'] - group[0]['head']) > 0 else group[0]['tail']
-            tail = group[-1]['tail'] if np.dot(merged_direction, group[-1]['tail'] - group[-1]['head']) > 0 else group[-1]['head']
-            
-            merged_features_for_plot.append({
-                'points': merged_points,
-                'direction': merged_direction,
-                'head': head,
-                'tail': tail
-            })
+        
+    # 打印合并结果统计信息
+    print("\n合并结果统计:")
+    print(f"总组数: {len(wire_groups)}")
+    for idx, group in enumerate(wire_groups):
+        print(f"第 {idx+1} 组包含 {len(group)} 条线段")
+        total_points = sum(len(seg['points']) for seg in group)
+        print(f"  总点数: {total_points}")
 
-        # 绘制合并后的结果
-        plot_3d_points_with_endpoints(merged_features_for_plot, f"{output_prefix}_merged", b_draw_direction=False, b_draw_endpoints=False)
+    visualize_merged_wires(wire_groups, output_prefix+"_merged", b_draw_endpoints=False, b_draw_direction=False)
     
     return wire_groups
+
+def interpolate_segments(prev_seg, next_seg, step=0.002):
+    # 1. 输入参数解析
+    tail_point = prev_seg['tail']  # 前段尾部端点坐标
+    tail_dir = prev_seg['direction']  # 前段主方向单位向量
+    head_point = next_seg['head']  # 后段头部端点坐标
+    head_dir = next_seg['direction']  
+      
+    # 2. 参数化设置
+    # 生成线性插值权重（从0到1均匀变化）
+    direct_vector = head_point - tail_point  # 端点连线向量
+    direct_length = np.linalg.norm(direct_vector)  # 端点间直线距离
+    weights = np.linspace(0, 1, int(direct_length/step))
+
+    interpolated = []
+    point = tail_point
+    for i, w in enumerate(weights):
+        if 0: # 曲线拟合
+            # 混合两个线段的方向向量，计算混合权重
+            blended_dir = (1 - w) * tail_dir + w * head_dir
+            blended_dir /= np.linalg.norm(blended_dir) + 1e-8  # 归一化
+
+            dist_vector = head_point - point  # 端点连线向量
+            dist_length = np.linalg.norm(dist_vector)
+            dist_vector = blended_dir * dist_length
+            dynamic_step = dist_vector / (len(weights)-i)
+            point = point + dynamic_step   
+        else: # 直线拟合
+            # 在计算dist_vector前添加类型转换
+            point = point.astype(np.float64)  # 确保当前点为浮点类型
+            dist_vector = head_point.astype(np.float64) - point  # 显式转换为浮点
+            
+            # 归一化前再次确保类型正确
+            dist_vector = dist_vector.astype(np.float64)
+            dist_length = np.linalg.norm(dist_vector)
+            dist_vector /= (dist_length + 1e-8)  # 现在可以安全操作
+            dynamic_step = dist_vector * dist_length / (len(weights)-i)
+            point = point + dynamic_step  
+        interpolated.append(point)
+    return np.array(interpolated), weights
+
+def interpolate_golden_wires(merged_wires, step=0.002):
+    """处理所有需要插值的金线段"""
+    processed_wires = []
+    occlusion_points = []
+    for wire in merged_wires:
+        if len(wire) <= 1:
+            processed_wires.append(wire)
+            continue
+            
+        new_wire = [wire[0]]
+        for i in range(1, len(wire)):
+            # 生成插值点
+            b_occlusion, pt = check_occlusion(wire[i-1], wire[i], merged_wires)
+            if b_occlusion:
+                interpolated_points, weights = interpolate_segments(wire[i-1], wire[i], step)
+                occlusion_points.append(pt)
+
+            # 创建插值线段特征
+            if len(interpolated_points) > 0:
+                interpolated_seg = {
+                    'points': interpolated_points,
+                    'direction': compute_pca_direction(interpolated_points),
+                    'head': interpolated_points[0],
+                    'tail': interpolated_points[-1]
+                }
+                new_wire.append(interpolated_seg)
+            
+            new_wire.append(wire[i])
+        
+        processed_wires.append(new_wire)
+        # 打印合并结果统计信息
+    print("\n插值后结果统计:")
+    print(f"总组数: {len(processed_wires)}")
+    for idx, group in enumerate(processed_wires):
+        print(f"第 {idx+1} 组包含 {len(group)} 条线段")
+        total_points = sum(len(seg['points']) for seg in group)
+        print(f"  总点数: {total_points}")
+    
+    return processed_wires, occlusion_points
 
 def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, mask_txt_path, output_prefix='output', b_save_pointcloud=False, b_calc_total_pointcloud=False):
     # 1. 创建深度图到点云转换器
@@ -534,13 +649,13 @@ def process_single_frame(ini_path, tiff_path, png_path, roi_vertices, mask_txt_p
         )
     
     # 4. 合并金线
-    golden_wire_medlines_3d = golden_wire_medlines_3d#[10:14]
+    golden_wire_medlines_3d = golden_wire_medlines_3d[9:14]
     print(f"合并前金线数量: {len(golden_wire_medlines_3d)}")
     merged_golden_wires = merge_golden_wires(golden_wire_medlines_3d, 0.1, output_prefix)
     print(f"合并后金线数量: {len(merged_golden_wires)}")
     
-    
-    
+    final_wires, occlusion_points = interpolate_golden_wires(merged_golden_wires, 0.001)
+    visualize_merged_wires(final_wires, output_prefix+"_final", b_draw_endpoints=False, b_draw_direction=False, occlusion_points=occlusion_points)
     
     # 将结果整合到返回字典
     results = {
@@ -622,7 +737,113 @@ def main():
     process_folder(data_folder, output_folder, roi_vertices, start_idx=start_idx, end_idx=end_idx, b_save_pointcloud=b_save_pointcloud, b_calc_total_pointcloud=b_calc_total_pointcloud)
     
 
+
+def test_interpolate_segments():
+    # 测试数据准备（添加显式类型声明）
+    prev_seg = {
+        'tail': np.array([1.0, 3.0, 0.0], dtype=np.float64),
+        'head': np.array([1.0, 3.0, 0.0], dtype=np.float64),
+        'direction': np.array([1.0, 0.0, 0.0], dtype=np.float64),
+        'points': np.array([[1.0, 3.0, 0.0]], dtype=np.float64)
+    }
+
+    next_seg = {
+        'tail': np.array([3.0, 1.0, 0.0], dtype=np.float64),
+        'head': np.array([3.0, 1.0, 0.0], dtype=np.float64),
+        'direction': np.array([0.0, -1.0, 0.0], dtype=np.float64),
+        'points': np.array([[3.0, 1.0, 0.0]], dtype=np.float64)
+    }
+
+    # 生成插值点
+    interp_points, weights = interpolate_segments(prev_seg, next_seg, step=0.05)
+
+    print("插值点坐标:\n", interp_points)
+    
+    # 创建2D绘图
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111)  # 移除3D投影参数
+    
+    # 绘制插值点（移除z轴数据）
+    ax.scatter(interp_points[:,0], interp_points[:,1], 
+              c='r', marker='o', s=20, alpha=0.8, label='Interpolated Points')
+    
+    # 坐标轴设置（移除z轴标签）
+    ax.set_xlabel('X (mm)')
+    ax.set_ylabel('Y (mm)')
+    ax.set_title('2D Interpolated Points Visualization')
+    
+    # 添加图例（移除视角调整）
+    ax.legend()
+    ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(f"interpolation_test_2d.png", dpi=150)
+    plt.close()
+    
+    return
+
+def check_occlusion(prev_seg, next_seg, all_wires, z_threshold=0.02, xy_thredhold=0.02, sample_step=0.001):
+    """
+    检测两个金线段之间是否存在遮挡
+    参数:
+        prev_seg: 前段金线特征字典
+        next_seg: 后段金线特征字典
+        all_wires: 所有已合并金线组的列表
+        z_threshold: Z轴高度判定阈值(单位:mm)
+    返回:
+        bool: True表示存在遮挡，False表示无遮挡
+    """
+    print("遮挡判断:")
+    # 1. 获取连接线段端点
+    p1 = prev_seg['tail'].astype(np.float64)
+    p2 = next_seg['head'].astype(np.float64)
+    
+    # 2. 生成连接线段采样点（XY平面投影）
+    num_samples = max(100, int(np.linalg.norm(p2[:2] - p1[:2]) / sample_step))  # 每1um采样一个点
+    t_values = np.linspace(0, 1, num_samples)
+    connection_points = np.array([p1 + t*(p2-p1) for t in t_values])
+    
+    # 3. 构建连接线段参数方程
+    def line_param(t):
+        return p1 + t*(p2 - p1)
+    
+    # 4. 遍历所有其他金线
+    for wire_idx, wire in enumerate(all_wires, 1):  # 金线组序号从1开始
+        for seg_idx, seg in enumerate(wire, 1):     # 线段序号从1开始
+            # 跳过当前正在连接的两个线段
+            if seg is prev_seg or seg is next_seg:
+                continue
+                
+            # 检查该线段的所有点
+            for pt in seg['points']:
+                pt = pt.astype(np.float64)
+                
+                # 4.1 在XY 平面，计算点到连接线段的投影参数
+                vec = pt[:2] - p1[:2]
+                dir_vec = p2[:2] - p1[:2]
+                t = np.dot(vec, dir_vec) / (np.dot(dir_vec, dir_vec) + 1e-8)
+                
+                # 4.2 判断是否在投影区域内
+                if 0 <= t <= 1: # 表示点投影在线段内部
+                    # 计算投影点坐标
+                    proj_pt = line_param(t)
+                    xy_distance = np.linalg.norm(pt[:2] - proj_pt[:2])
+                    
+                    # 4.3 距离阈值判断
+                    if xy_distance < xy_thredhold:
+                        # 4.4 比较Z轴高度
+                        connection_z = proj_pt[2]
+                        if pt[2] > connection_z + z_threshold:
+                            print(f"遮挡点位于: 第{wire_idx}组金线 第{seg_idx}段")
+                            print(f"  遮挡点坐标: {np.round(pt, 3)}")
+                            print(f"  对应连接线位置: {np.round(proj_pt, 3)} (距离值: {connection_z:.3f}mm)")
+                            print(f"  垂直高度差: {pt[2] - connection_z:.3f}mm")
+                            return True, pt
+    print("---->无遮挡")
+    return False, None
+
 if __name__ == "__main__":
     main()
+    #test_interpolate_segments()
 
 
