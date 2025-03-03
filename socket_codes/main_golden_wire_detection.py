@@ -251,20 +251,20 @@ def plot_3d_wire_sections(wire_features, output_prefix, b_draw_direction=True, b
     ]
     ax.legend(handles=legend_elements, loc='upper left', fontsize=10)
     # 修改后的遮挡点绘制逻辑
-    if occlusion_points:  # 自动处理空列表和None的情况
-        # 统一转换为numpy数组
-        occlusion_array = np.array(occlusion_points)
-        ax.scatter(occlusion_array[:,0], 
-                  occlusion_array[:,1],
-                  occlusion_array[:,2],
-                  c='red', 
-                  marker='*', 
-                  s=80,
-                  edgecolor='black',
-                  linewidth=0.8,
-                  alpha=0.9,
-                  zorder=5,
-                  label='Occlusion Points')
+    # if occlusion_points:  # 自动处理空列表和None的情况
+    #     # 统一转换为numpy数组
+    #     occlusion_array = np.array(occlusion_points)
+    #     ax.scatter(occlusion_array[:,0], 
+    #               occlusion_array[:,1],
+    #               occlusion_array[:,2],
+    #               c='red', 
+    #               marker='*', 
+    #               s=80,
+    #               edgecolor='black',
+    #               linewidth=0.8,
+    #               alpha=0.9,
+    #               zorder=5,
+    #               label='Occlusion Points')
     # 保存输出
     plt.savefig(f'{output_prefix}_wire_3d.png', 
                dpi=300, 
@@ -632,7 +632,60 @@ def interpolate_segments(prev_seg, next_seg, step=0.002):
             dynamic_step = dist_vector * dist_length / (len(weights)-i)
             point = point + dynamic_step  
         interpolated.append(point)
-    return np.array(interpolated), weights
+    return np.array(interpolated)
+
+def cubic_hermite_point(p0, p1, m0, m1, t):
+    """ 立方 Hermite 样条插值公式，返回曲线在参数 t ∈ [0,1] 处的坐标 """
+    h00 =  2*t**3 - 3*t**2 + 1
+    h10 =      t**3 - 2*t**2 + t
+    h01 = -2*t**3 + 3*t**2
+    h11 =      t**3 -    t**2
+    return h00*p0 + h10*m0 + h01*p1 + h11*m1
+
+def interpolate_segments_new(prev_seg, next_seg, step=0.002, tangent_scale=1.0):
+    """
+    使用立方 Hermite 样条，在 3D 空间平滑地连接两段:
+      - 前段的尾点 = prev_seg['tail'], 方向 = prev_seg['direction']
+      - 后段的头点 = next_seg['head'], 方向 = next_seg['direction']
+    并返回插值后的点集(大小约为 num_samples+1)，
+    保证曲线起点与前段尾点相同，终点与后段头点相同，且起止方向基本与给定向量对齐。
+
+    参数:
+      prev_seg: {'tail': np.array([x, y, z]), 'direction': np.array([dx, dy, dz])}
+      next_seg: {'head': np.array([x, y, z]), 'direction': np.array([dx, dy, dz])}
+      num_samples: 需要在 [0,1] 上采样多少份(实际输出点数是 num_samples+1)
+      tangent_scale: 控制起止切线的长度 (默认=1.0)，可按需调大/调小来改变曲线弯曲程度
+    """
+    p0 = prev_seg['tail']                 # 前段尾点
+    d0 = prev_seg['direction']            # 前段尾方向(建议传单位向量)
+    p1 = next_seg['head']                 # 后段头点
+    d1 = next_seg['direction']            # 后段头方向(建议传单位向量)
+
+    # 如果两端点重合, 没什么可插值, 直接返回这个点
+    if np.linalg.norm(p1 - p0) < 1e-12:
+        return np.array([p0.copy()])
+
+    # 根据需要, 决定如何给切线向量赋予“长度”
+    # 一般会与 (p1 - p0) 距离相关, 也会与自己的方向相关.
+    # 例如可以让:
+    #   m0 = d0 * (||p1 - p0|| * tangent_scale)
+    #   m1 = d1 * (||p1 - p0|| * tangent_scale)
+    # 这样起止处的切线长度与首尾间距、以及一个缩放系数成正比.
+    dist = np.linalg.norm(p1 - p0)
+    m0 = d0 * (dist * tangent_scale)
+    m1 = d1 * (dist * tangent_scale)
+
+    # 逐步采样 t ∈ [0,1] 的插值点
+    points = []
+    direct_vector = p1 - p0  # 端点连线向量
+    direct_length = np.linalg.norm(direct_vector)  # 端点间直线距离
+    num_samples = int(direct_length/step)
+    for i in range(num_samples+1):
+        t = i / float(num_samples)  # 在 [0,1] 内均分
+        pt = cubic_hermite_point(p0, p1, m0, m1, t)
+        points.append(pt)
+    return np.array(points)
+
 
 def interpolate_golden_wires(merged_wires, step=0.002):
     """处理所有需要插值的金线段"""
@@ -647,8 +700,8 @@ def interpolate_golden_wires(merged_wires, step=0.002):
         for i in range(1, len(wire)):
             # 生成插值点
             b_occlusion, pt = check_occlusion(wire[i-1], wire[i], merged_wires)
-            if b_occlusion:
-                interpolated_points, weights = interpolate_segments(wire[i-1], wire[i], step)
+            if 1:
+                interpolated_points = interpolate_segments_new(wire[i-1], wire[i], step=0.002)
                 occlusion_points.append(pt)
 
             # 创建插值线段特征
@@ -796,24 +849,23 @@ def main():
     
     process_folder(data_folder, output_folder, roi_vertices, start_idx=start_idx, end_idx=end_idx, b_save_pointcloud=b_save_pointcloud, b_calc_total_pointcloud=b_calc_total_pointcloud)
 
+
 def test_interpolate_segments():
     # 测试数据准备（添加显式类型声明）
     prev_seg = {
         'tail': np.array([1.0, 3.0, 0.0], dtype=np.float64),
-        'head': np.array([1.0, 3.0, 0.0], dtype=np.float64),
+        'head': np.array([-1.0, 3.0, 0.0], dtype=np.float64),
         'direction': np.array([1.0, 0.0, 0.0], dtype=np.float64),
-        'points': np.array([[1.0, 3.0, 0.0]], dtype=np.float64)
     }
 
     next_seg = {
-        'tail': np.array([3.0, 1.0, 0.0], dtype=np.float64),
+        'tail': np.array([3.0, -1.0, 0.0], dtype=np.float64),
         'head': np.array([3.0, 1.0, 0.0], dtype=np.float64),
         'direction': np.array([0.0, -1.0, 0.0], dtype=np.float64),
-        'points': np.array([[3.0, 1.0, 0.0]], dtype=np.float64)
     }
 
     # 生成插值点
-    interp_points, weights = interpolate_segments(prev_seg, next_seg, step=0.05)
+    interp_points = interpolate_segments_new(prev_seg, next_seg)
 
     print("插值点坐标:\n", interp_points)
     
