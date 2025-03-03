@@ -534,6 +534,66 @@ def merge_golden_wires(golden_wire_medlines_3d, dist_threshold=0.1, output_prefi
     
     return wire_groups
 
+def check_occlusion(prev_seg, next_seg, all_wires, z_threshold=0.02, xy_thredhold=0.02, sample_step=0.001):
+    """
+    检测两个金线段之间是否存在遮挡
+    参数:
+        prev_seg: 前段金线特征字典
+        next_seg: 后段金线特征字典
+        all_wires: 所有已合并金线组的列表
+        z_threshold: Z轴高度判定阈值(单位:mm)
+    返回:
+        bool: True表示存在遮挡，False表示无遮挡
+    """
+    print("遮挡判断:")
+    # 1. 获取连接线段端点
+    p1 = prev_seg['tail'].astype(np.float64)
+    p2 = next_seg['head'].astype(np.float64)
+    
+    # 2. 生成连接线段采样点（XY平面投影）
+    num_samples = max(100, int(np.linalg.norm(p2[:2] - p1[:2]) / sample_step))  # 每1um采样一个点
+    t_values = np.linspace(0, 1, num_samples)
+    connection_points = np.array([p1 + t*(p2-p1) for t in t_values])
+    
+    # 3. 构建连接线段参数方程
+    def line_param(t):
+        return p1 + t*(p2 - p1)
+    
+    # 4. 遍历所有其他金线
+    for wire_idx, wire in enumerate(all_wires, 1):  # 金线组序号从1开始
+        for seg_idx, seg in enumerate(wire, 1):     # 线段序号从1开始
+            # 跳过当前正在连接的两个线段
+            if seg is prev_seg or seg is next_seg:
+                continue
+                
+            # 检查该线段的所有点
+            for pt in seg['points']:
+                pt = pt.astype(np.float64)
+                
+                # 4.1 在XY 平面，计算点到连接线段的投影参数
+                vec = pt[:2] - p1[:2]
+                dir_vec = p2[:2] - p1[:2]
+                t = np.dot(vec, dir_vec) / (np.dot(dir_vec, dir_vec) + 1e-8)
+                
+                # 4.2 判断是否在投影区域内
+                if 0 <= t <= 1: # 表示点投影在线段内部
+                    # 计算投影点坐标
+                    proj_pt = line_param(t)
+                    xy_distance = np.linalg.norm(pt[:2] - proj_pt[:2])
+                    
+                    # 4.3 距离阈值判断
+                    if xy_distance < xy_thredhold:
+                        # 4.4 比较Z轴高度
+                        connection_z = proj_pt[2]
+                        if pt[2] > connection_z + z_threshold:
+                            print(f"遮挡点位于: 第{wire_idx}组金线 第{seg_idx}段")
+                            print(f"  遮挡点坐标: {np.round(pt, 3)}")
+                            print(f"  对应连接线位置: {np.round(proj_pt, 3)} (距离值: {connection_z:.3f}mm)")
+                            print(f"  垂直高度差: {pt[2] - connection_z:.3f}mm")
+                            return True, pt
+    print("---->无遮挡")
+    return False, None
+
 def interpolate_segments(prev_seg, next_seg, step=0.002):
     # 1. 输入参数解析
     tail_point = prev_seg['tail']  # 前段尾部端点坐标
@@ -735,8 +795,6 @@ def main():
     end_idx = 1
     
     process_folder(data_folder, output_folder, roi_vertices, start_idx=start_idx, end_idx=end_idx, b_save_pointcloud=b_save_pointcloud, b_calc_total_pointcloud=b_calc_total_pointcloud)
-    
-
 
 def test_interpolate_segments():
     # 测试数据准备（添加显式类型声明）
@@ -781,66 +839,6 @@ def test_interpolate_segments():
     plt.close()
     
     return
-
-def check_occlusion(prev_seg, next_seg, all_wires, z_threshold=0.02, xy_thredhold=0.02, sample_step=0.001):
-    """
-    检测两个金线段之间是否存在遮挡
-    参数:
-        prev_seg: 前段金线特征字典
-        next_seg: 后段金线特征字典
-        all_wires: 所有已合并金线组的列表
-        z_threshold: Z轴高度判定阈值(单位:mm)
-    返回:
-        bool: True表示存在遮挡，False表示无遮挡
-    """
-    print("遮挡判断:")
-    # 1. 获取连接线段端点
-    p1 = prev_seg['tail'].astype(np.float64)
-    p2 = next_seg['head'].astype(np.float64)
-    
-    # 2. 生成连接线段采样点（XY平面投影）
-    num_samples = max(100, int(np.linalg.norm(p2[:2] - p1[:2]) / sample_step))  # 每1um采样一个点
-    t_values = np.linspace(0, 1, num_samples)
-    connection_points = np.array([p1 + t*(p2-p1) for t in t_values])
-    
-    # 3. 构建连接线段参数方程
-    def line_param(t):
-        return p1 + t*(p2 - p1)
-    
-    # 4. 遍历所有其他金线
-    for wire_idx, wire in enumerate(all_wires, 1):  # 金线组序号从1开始
-        for seg_idx, seg in enumerate(wire, 1):     # 线段序号从1开始
-            # 跳过当前正在连接的两个线段
-            if seg is prev_seg or seg is next_seg:
-                continue
-                
-            # 检查该线段的所有点
-            for pt in seg['points']:
-                pt = pt.astype(np.float64)
-                
-                # 4.1 在XY 平面，计算点到连接线段的投影参数
-                vec = pt[:2] - p1[:2]
-                dir_vec = p2[:2] - p1[:2]
-                t = np.dot(vec, dir_vec) / (np.dot(dir_vec, dir_vec) + 1e-8)
-                
-                # 4.2 判断是否在投影区域内
-                if 0 <= t <= 1: # 表示点投影在线段内部
-                    # 计算投影点坐标
-                    proj_pt = line_param(t)
-                    xy_distance = np.linalg.norm(pt[:2] - proj_pt[:2])
-                    
-                    # 4.3 距离阈值判断
-                    if xy_distance < xy_thredhold:
-                        # 4.4 比较Z轴高度
-                        connection_z = proj_pt[2]
-                        if pt[2] > connection_z + z_threshold:
-                            print(f"遮挡点位于: 第{wire_idx}组金线 第{seg_idx}段")
-                            print(f"  遮挡点坐标: {np.round(pt, 3)}")
-                            print(f"  对应连接线位置: {np.round(proj_pt, 3)} (距离值: {connection_z:.3f}mm)")
-                            print(f"  垂直高度差: {pt[2] - connection_z:.3f}mm")
-                            return True, pt
-    print("---->无遮挡")
-    return False, None
 
 if __name__ == "__main__":
     main()
