@@ -195,8 +195,43 @@ class DepthToPointCloud:
         y = -y
         return np.array([x, y, z])
 
+import os
 def main():
-    pass
+    # 读取配置文件
+    ini_path = "./dataset/1.ini"
+    tiff_path = "./dataset/1.tiff"
+    png_path = "./dataset/1_0.png"
+    output_prefix = "./dataset/output/1"
+    # 确保输出目录存在
+    os.makedirs(os.path.dirname(output_prefix), exist_ok=True)
+    
+    roi_vertices = np.array([
+        [0, 0],  # 左上角
+        [0, 5120],  # 左下角
+        [5120, 5120],  # 右下角
+        [5120, 0]   # 右上角
+    ])
+    
+    converter = DepthToPointCloud(vertices=roi_vertices)
+    converter.read_config(ini_path)
+    
+    # 读取深度图
+    depth_image = converter.read_depth_image(tiff_path)
+    # 可视化深度图
+    plt.figure(figsize=(10, 8))
+    plt.imshow(depth_image, cmap='jet')
+    plt.colorbar()
+    plt.title('Depth Map')
+    plt.savefig(f'{output_prefix}_depth_image.png')
+    plt.close()
+    # 处理原始RGB图像
+    cropped_image, bbox = converter.crop_roi_from_image(png_path, output_prefix)
+    
+    # 转换为点云
+    if (1):
+        points_3d, points_2d = converter.convert_to_pointcloud(bbox)
+        # 保存点云
+        converter.save_pointcloud(points_3d, points_2d, output_prefix + "_3d.txt", output_prefix + "_2d.txt")
 
 if __name__ == "__main__":
     main() 

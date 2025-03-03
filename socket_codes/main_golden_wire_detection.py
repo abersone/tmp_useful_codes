@@ -865,7 +865,7 @@ def test_interpolate_segments():
     }
 
     # 生成插值点
-    interp_points = interpolate_segments_new(prev_seg, next_seg)
+    interp_points = interpolate_segments_new(prev_seg, next_seg, 0.05, 1.0)
 
     print("插值点坐标:\n", interp_points)
     
