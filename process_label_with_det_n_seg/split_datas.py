@@ -46,4 +46,4 @@ if __name__ == "__main__":
 
     image_path = folder + "/images"
     label_path = folder + "/labels"
-    split_data(image_path, label_path, 0.5)
+    split_data(image_path, label_path, 0.2)

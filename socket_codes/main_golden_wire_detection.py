@@ -594,46 +594,6 @@ def check_occlusion(prev_seg, next_seg, all_wires, z_threshold=0.02, xy_thredhol
     print("---->无遮挡")
     return False, None
 
-def interpolate_segments(prev_seg, next_seg, step=0.002):
-    # 1. 输入参数解析
-    tail_point = prev_seg['tail']  # 前段尾部端点坐标
-    tail_dir = prev_seg['direction']  # 前段主方向单位向量
-    head_point = next_seg['head']  # 后段头部端点坐标
-    head_dir = next_seg['direction']  
-      
-    # 2. 参数化设置
-    # 生成线性插值权重（从0到1均匀变化）
-    direct_vector = head_point - tail_point  # 端点连线向量
-    direct_length = np.linalg.norm(direct_vector)  # 端点间直线距离
-    weights = np.linspace(0, 1, int(direct_length/step))
-
-    interpolated = []
-    point = tail_point
-    for i, w in enumerate(weights):
-        if 0: # 曲线拟合
-            # 混合两个线段的方向向量，计算混合权重
-            blended_dir = (1 - w) * tail_dir + w * head_dir
-            blended_dir /= np.linalg.norm(blended_dir) + 1e-8  # 归一化
-
-            dist_vector = head_point - point  # 端点连线向量
-            dist_length = np.linalg.norm(dist_vector)
-            dist_vector = blended_dir * dist_length
-            dynamic_step = dist_vector / (len(weights)-i)
-            point = point + dynamic_step   
-        else: # 直线拟合
-            # 在计算dist_vector前添加类型转换
-            point = point.astype(np.float64)  # 确保当前点为浮点类型
-            dist_vector = head_point.astype(np.float64) - point  # 显式转换为浮点
-            
-            # 归一化前再次确保类型正确
-            dist_vector = dist_vector.astype(np.float64)
-            dist_length = np.linalg.norm(dist_vector)
-            dist_vector /= (dist_length + 1e-8)  # 现在可以安全操作
-            dynamic_step = dist_vector * dist_length / (len(weights)-i)
-            point = point + dynamic_step  
-        interpolated.append(point)
-    return np.array(interpolated)
-
 def cubic_hermite_point(p0, p1, m0, m1, t):
     """ 立方 Hermite 样条插值公式，返回曲线在参数 t ∈ [0,1] 处的坐标 """
     h00 =  2*t**3 - 3*t**2 + 1
@@ -893,7 +853,7 @@ def test_interpolate_segments():
     return
 
 if __name__ == "__main__":
-    main()
-    #test_interpolate_segments()
+    #main()
+    test_interpolate_segments()
 
 
