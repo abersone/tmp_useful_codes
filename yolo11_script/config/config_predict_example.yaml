@@ -1,0 +1,41 @@
+# 模型配置
+#model_path: 'yolo11m.pt'  # 默认模型路径（detect任务）
+#model_path: 'yolo11s-seg.pt'  # 分割模型
+model_path: 'yolo11m-obb.pt'  # OBB模型
+img_size: 1280
+model: /home/liuqin/Desktop/projects/datasets/tmp_val_test2/model/best.pt    # 要使用的模型路径（可选，会覆盖model_path）
+
+# 任务类型配置
+task: 'obb'  # 可选: 'detect', 'segment', 'pose', 'obb', 'classify'
+
+# 输入源配置
+source: '/home/liuqin/Desktop/projects/datasets/tmp_val_test2/image'  # 包含待预测图片的文件夹路径
+
+# 预测参数
+batch_size: 1
+device: '0'  # 使用 GPU device，如 '0', '1', 或 'cpu'
+
+# 预测特定参数
+conf_threshold: 0.25  # 置信度阈值，低于此值的目标将被忽略
+iou_threshold: 0.45     # IoU阈值，用于NMS
+max_det: 2000           # 每张图像的最大检测数量（所有类别总和）
+
+# 保存选项
+save_txt: false         # 保存预测结果为txt文件（YOLO格式）
+save_conf: true        # 在txt文件中保存置信度
+save_json: false       # 保存为COCO格式JSON
+save_crop: false       # 保存裁剪的预测框
+
+# 可视化选项
+show: true            # 显示结果（批量预测时建议设为false）
+show_labels: false      # 在预测图像上显示标签
+show_conf: false        # 在预测图像上显示置信度
+
+# 注意：YOLO的predict API不支持自定义字体大小和线条粗细
+# 如果需要自定义可视化样式，需要在预测后使用自定义的annotator进行重新绘制
+
+# 其他选项
+verbose: true          # 显示详细信息
+
+# 输出配置
+output_base_dir: '/home/liuqin/Desktop/projects/datasets/tmp_val_test2/runs'

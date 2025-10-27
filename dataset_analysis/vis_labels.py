@@ -241,13 +241,13 @@ def main():
     主函数：定义图像文件夹和标签文件夹路径
     """
     # 定义图像文件夹路径
-    image_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\seg_wire_v1\images\train"
+    image_folder = r"C:\Users\Eugene\Desktop\code\wire3d_detection\data\seg_dataset\leadpad\vehicle\20251027_100844_449"
     
     # 定义标签文件夹路径
-    label_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\seg_wire_v1\labels\train"
+    label_folder = r"C:\Users\Eugene\Desktop\code\wire3d_detection\data\seg_dataset\leadpad\vehicle\20251027_100844_449"
     
     # 定义输出文件夹路径
-    output_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\test" #label_folder + r"\vis"
+    output_folder = label_folder + r"\vis"
     # 可选：定义类别名称（如果知道的话）
     class_names = None  # 例如: ["person", "car", "bicycle"]
     

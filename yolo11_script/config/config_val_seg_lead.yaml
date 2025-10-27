@@ -1,0 +1,32 @@
+# 模型配置
+model_size: 's'  # 可选 'n', 's', 'm', 'l', 'x'
+model_path: 'yolo11s-seg.pt'  # 分割模型路径
+img_size: 512
+model: /home/liuqin/Desktop/projects/ultralytics/runs/segment/train/20250805_193028/seg_exp_s_512_20250805_193028/train/weights/best.pt    # 要验证的模型路径
+
+# 数据集配置
+data_yaml: '/home/liuqin/Desktop/projects/datasets/lead_seg_v2/data.yaml'
+
+# 验证参数
+batch_size: 16
+device: '0'  # 使用 GPU device
+
+# 验证特定参数
+conf_threshold: 0.25  # 置信度阈值
+iou_threshold: 0.45     # IoU阈值
+max_det: 300           # 最大检测数量
+
+# 保存选项
+save_txt: true         # 保存预测结果为txt文件
+save_conf: true        # 保存置信度
+save_json: true        # 保存为COCO格式JSON
+save_crop: true        # 保存裁剪的预测框
+
+# 可视化选项
+plots: true            # 生成混淆矩阵等图表
+show: false            # 显示结果（验证时建议设为false）
+show_labels: true      # 显示标签
+show_conf: true        # 显示置信度
+
+# 输出配置
+output_base_dir: '/home/liuqin/Desktop/projects/ultralytics/runs/segment/val' 

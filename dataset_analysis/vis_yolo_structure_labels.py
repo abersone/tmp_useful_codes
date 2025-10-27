@@ -243,7 +243,7 @@ def process_dataset(input_folder, output_folder, class_names=None):
 
 def main():
     # 使用新的文件夹结构: images/train, images/val, labels/train, labels/val
-    input_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\seg_leadpad_v0"
+    input_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\seg_ball_v1"
     output_folder = input_folder + "/vis"
     process_dataset(input_folder, output_folder)
     

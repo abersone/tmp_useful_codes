@@ -1,0 +1,44 @@
+# 模型配置
+model_size: 'm'  # 可选 'n', 's', 'm', 'l', 'x'
+model_path: 'yolo11m-obb.pt'  # OBB模型路径
+img_size: 1280
+pretrained: true
+resume: false  # 是否从中断处继续训练
+freeze: null   # 不冻结任何层
+model: null    # 预训练模型路径，如果为null则使用model_path
+
+# 数据集配置
+data_yaml: '/home/liuqin/Desktop/projects/datasets/wire_obb_v34/dataset.yaml'
+
+# 训练参数
+epochs: 2000
+batch_size: 16
+device: '0'  # 使用 GPU device
+early_stopping_patience: 400
+
+# 优化器和学习率参数
+optimizer: 'AdamW'        # 优化器类型: 'auto', 'SGD', 'Adam', 'AdamW', 'RMSProp'
+lr0: 0.00001             # 初始学习率
+# lrf: 0.01               # 最终学习率因子 (lr = lr0 * lrf)
+# momentum: 0.937         # SGD动量
+# weight_decay: 0.0005    # 权重衰减
+# warmup_epochs: 3.0      # 预热轮数
+# warmup_momentum: 0.8    # 预热动量
+# warmup_bias_lr: 0.1     # 预热偏置学习率
+
+# 数据增强参数
+augment: true  # 启用数据增强
+degrees: 3.0   # -180~180度随机旋转（OBB任务建议设为0）
+scale: 0.0     # 在0.8~1.2倍之间随机缩放
+translate: 0.1 # 在图像尺寸的±10%范围内平移
+fliplr: 0.5    # 50%的概率进行水平翻转
+flipud: 0.5    # 垂直翻转（OBB任务建议设为0）
+mosaic: 0.0    # 关闭mosaic（OBB任务建议关闭）
+mixup: 0.0     # 关闭mixup（OBB任务建议关闭）
+
+# 裁切参数
+copy_paste: 0.0      # 关闭copy_paste（OBB任务建议关闭）
+crop_fraction: 1.0   # 裁切比例，保留80%的区域
+
+# 输出配置
+output_base_dir: '/home/liuqin/Desktop/projects/ultralytics/runs/obb/train' 
