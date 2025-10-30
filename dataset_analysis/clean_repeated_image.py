@@ -184,15 +184,15 @@ class ImageDeduplicator:
         for hash_value, file_list in tqdm(self.hash_to_files.items(), desc="复制图像"):
             # 选择第一个文件作为代表
             source_file = file_list[0]
-
+            new_name = source_file.name
             # 生成新的文件名（保持原名或添加序号）
-            if len(file_list) > 1:
-                # 如果有重复，在文件名中添加哈希值的一部分
-                file_stem = source_file.stem
-                file_suffix = source_file.suffix
-                new_name = f"{file_stem}_{hash_value[:8]}{file_suffix}"
-            else:
-                new_name = source_file.name
+            # if len(file_list) > 1:
+            #     # 如果有重复，在文件名中添加哈希值的一部分
+            #     file_stem = source_file.stem
+            #     file_suffix = source_file.suffix
+            #     new_name = f"{file_stem}_{hash_value[:8]}{file_suffix}"
+            # else:
+            #     new_name = source_file.name
 
             destination_file = self.output_folder / new_name
 
@@ -262,7 +262,7 @@ def main():
     parser.add_argument("-i", "--input", help="输入文件夹路径", required=True)
     parser.add_argument("-o", "--output", help="输出文件夹路径（可选）")
     parser.add_argument("-m", "--method", choices=['md5', 'perceptual', 'dhash'],
-                       default='perceptual', help="哈希方法 (默认: perceptual)")
+                       default='dhash', help="哈希方法 (默认: perceptual)")
 
     args = parser.parse_args()
 
@@ -275,7 +275,6 @@ def main():
     if not input_path.is_dir():
         print(f"错误: 输入路径不是文件夹: {args.input}")
         sys.exit(1)
-
     # 创建去重器并执行处理
     deduplicator = ImageDeduplicator(
         input_folder=args.input,
