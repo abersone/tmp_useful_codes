@@ -4,30 +4,33 @@ import numpy as np
 from pathlib import Path
 import argparse
 
-def parse_yolo11_segmentation_label(label_path, img_width, img_height):
+def parse_yolo11_segmentation_label(label_path, img_width, img_height, debug=False):
     """
     解析YOLO11分割标签文件
     格式：N行M列，第一列为类别，其余列为归一化坐标点
     """
     contours = []
     classes = []
+    skipped_objects = 0  # 统计跳过的对象数量
+    skipped_reasons = []  # 记录跳过的原因
     
     try:
         with open(label_path, 'r') as f:
             lines = f.readlines()
         
-        for line in lines:
+        for line_num, line in enumerate(lines, 1):
             line = line.strip()
             if not line:
                 continue
                 
             values = line.split()
             if len(values) < 3:  # 至少需要类别和两个坐标点
+                skipped_objects += 1
+                skipped_reasons.append(f"行{line_num}: 值数量不足({len(values)}个值)")
                 continue
                 
             try:
                 class_id = int(values[0])
-                classes.append(class_id)
                 
                 # 解析坐标点
                 points = []
@@ -36,17 +39,37 @@ def parse_yolo11_segmentation_label(label_path, img_width, img_height):
                         x_norm = float(values[i])
                         y_norm = float(values[i + 1])
                         
-                        # 转换为像素坐标
-                        x = int(x_norm * img_width)
-                        y = int(y_norm * img_height)
+                        # 检查坐标是否在有效范围内（允许稍微超出0-1范围）
+                        if x_norm < -0.1 or x_norm > 1.1 or y_norm < -0.1 or y_norm > 1.1:
+                            if debug:
+                                print(f"警告: {label_path} 行{line_num} 坐标超出范围: ({x_norm:.3f}, {y_norm:.3f})")
+                        
+                        # 转换为像素坐标，并限制在图像范围内
+                        x = int(np.clip(x_norm * img_width, 0, img_width - 1))
+                        y = int(np.clip(y_norm * img_height, 0, img_height - 1))
                         points.append([x, y])
                 
-                if len(points) >= 3:  # 至少需要3个点形成轮廓
+                # 只有当点数>=3时，才同时添加class_id和轮廓，保持两个列表同步
+                if len(points) >= 3:
                     contours.append(np.array(points, dtype=np.int32))
+                    classes.append(class_id)
+                else:
+                    skipped_objects += 1
+                    coord_count = len(values) - 1
+                    skipped_reasons.append(f"行{line_num}: 类别{class_id}, 点数不足(仅{len(points)}个点, {coord_count}个坐标值)")
                     
             except (ValueError, IndexError) as e:
-                print(f"解析标签文件 {label_path} 时出错: {e}")
+                skipped_objects += 1
+                skipped_reasons.append(f"行{line_num}: 解析错误 - {e}")
                 continue
+        
+        # 如果有跳过的对象，打印详细信息
+        if skipped_objects > 0 and debug:
+            print(f"\n⚠️  {label_path.name} 跳过了 {skipped_objects} 个对象:")
+            for reason in skipped_reasons[:5]:  # 只显示前5个
+                print(f"   - {reason}")
+            if len(skipped_reasons) > 5:
+                print(f"   ... 还有 {len(skipped_reasons) - 5} 个")
                 
     except FileNotFoundError:
         print(f"标签文件不存在: {label_path}")
@@ -201,8 +224,8 @@ def process_images_and_labels(image_folder, label_folder, output_folder,class_na
                 # 如果没有轮廓，直接使用原图
                 result_image = image
             
-            # 保存结果图像
-            output_img_path = Path(output_folder) / img_file.name
+            # 保存结果图像，统一使用.jpg格式
+            output_img_path = Path(output_folder) / f"{img_file.stem}.jpg"
             cv2.imwrite(str(output_img_path), result_image)
             
             processed_count += 1
@@ -241,10 +264,10 @@ def main():
     主函数：定义图像文件夹和标签文件夹路径
     """
     # 定义图像文件夹路径
-    image_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\obb\20_png"
+    image_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\obb\20251111_164256_109"
     
     # 定义标签文件夹路径
-    label_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\obb\20_png"
+    label_folder = r"C:\Users\Eugene\Desktop\vehicle_dataset\obb\20251111_164256_109"
     
     # 定义输出文件夹路径
     output_folder = label_folder + r"\vis"

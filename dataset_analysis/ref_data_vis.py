@@ -51,7 +51,7 @@ def visualize_annotations(image_file, txt_file, output_image=None):
 
 if __name__ == '__main__':
     # 设置文件路径
-    folder = r'C:\Users\Eugene\Desktop\code\wire2d_detection\data\input\C4PS55\20250826-wuxian\ref_data'
+    folder = r'C:\Users\Eugene\Desktop\code\wire3d_detection\data\input\vehicle\20251107_34pcs\ref_data'
     image_file = f'{folder}/ref_light.png'  
     output_txt = f'{folder}/ref_label.txt'  
     output_image = f'{folder}/ref_light_visualized.png'  

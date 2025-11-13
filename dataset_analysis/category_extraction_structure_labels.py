@@ -45,6 +45,6 @@ def extract_classes(yolo_root, class_ids, new_class_ids):
                     print(f'警告: 找不到图片 {img_name}，跳过。')
 
 if __name__ == '__main__':
-    yolo_root = r'C:\Users\Eugene\Desktop\vehicle_dataset\processing\org\seg_padnball_dataset_v1.0_for_cz'
-    extract_classes(yolo_root, class_ids=[0, 1], new_class_ids=[0])
+    yolo_root = r'C:\Users\Eugene\Desktop\vehicle_dataset\obb\all_yolo'
+    extract_classes(yolo_root, class_ids=[0, 1, 2, 3], new_class_ids=[2])
     print('多类别数据提取完成！')
